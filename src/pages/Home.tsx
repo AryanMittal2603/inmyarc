@@ -1,245 +1,46 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import gsap from 'gsap';
 import { SetupNotice } from '../components/SetupNotice';
+import { cx } from '../components/ui';
 import { ApiError, api, errorText } from '../lib/api';
-import { APP, longDate, today, weekdayName } from '../lib/config';
+import { APP, BROWNIES, VERDICTS, longDate, today, weekdayName } from '../lib/config';
 import { displayLink, links } from '../lib/routes';
-import { HORIZON, SITE, clock, compass, horizontal, istMinutes, istMoment, sunAt, sunDay, type SunPoint } from '../lib/sun';
 import type { TeamLink } from '../lib/types';
 
 /*
- * The front door. The hero is a sun-path diagram: the sky over the team as seen from above,
- * horizon at the rim, zenith in the middle. Today's arc of the sun is drawn in gold over the
- * solstice and equinox arcs, and the gold dot is the sun right now. Below, every team with an
- * orbit that sweeps round as its people log today.
+ * The front door: what the daily log is, how it works, and every team's links.
+ * Light and airy, indigo accents, a few floating product cards. No pricing: it's an internal tool.
  */
 
-const C = 300; // centre of the 600 × 600 chart
-const R = 228; // the horizon
-
+const INDIGO = '#3f3cf0';
 const reducedMotion = () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-/** Plan view, north up: zenith at the centre, the horizon at radius R. Below the horizon falls outside the rim. */
-function project({ alt, az }: SunPoint): [number, number] {
-  const r = (R * (90 - Math.max(alt, -18))) / 90;
-  const a = (az * Math.PI) / 180;
-  return [C + r * Math.sin(a), C - r * Math.cos(a)];
-}
-
-function pathOf(points: SunPoint[]): string {
-  return points.map((p, i) => `${i ? 'L' : 'M'}${project(p).map((n) => n.toFixed(1)).join(' ')}`).join(' ');
-}
-
-/** A whole day's arc above the horizon for a fixed declination (the reference arcs). */
-function arcFor(dec: number): string {
-  const points: SunPoint[] = [];
-  for (let h = -180; h <= 180; h += 1) {
-    const p = horizontal(dec, h);
-    if (p.alt >= HORIZON) points.push(p);
-  }
-  return pathOf(points);
-}
-
-const REFERENCE = [
-  { key: 'june', label: 'Jun 21', dec: 23.44 },
-  { key: 'equinox', label: 'Mar 20, Sep 23', dec: 0 },
-  { key: 'december', label: 'Dec 21', dec: -23.44 },
-].map((r) => {
-  const noon = project(horizontal(r.dec, 0));
-  return { ...r, d: arcFor(r.dec), noon };
-});
-
-function SunChart({ day, now }: { day: string; now: Date }) {
-  const sun = useMemo(() => sunDay(day), [day]);
-  const minutes = istMinutes(now);
-  const current = sunAt(now);
-  const up = current.alt >= HORIZON;
-
-  const todayPath = useMemo(() => {
-    if (sun.sunrise === null || sun.sunset === null) return '';
-    const points: SunPoint[] = [];
-    for (let m = sun.sunrise; m <= sun.sunset; m += 3) points.push(sunAt(istMoment(day, m)));
-    points.push(sunAt(istMoment(day, sun.sunset)));
-    return pathOf(points);
-  }, [day, sun]);
-
-  const hours = useMemo(() => {
-    if (sun.sunrise === null || sun.sunset === null) return [];
-    const list: Array<{ h: number; x: number; y: number; lx: number; ly: number }> = [];
-    for (let h = Math.ceil(sun.sunrise / 60); h * 60 <= sun.sunset; h += 1) {
-      const [x, y] = project(sunAt(istMoment(day, h * 60)));
-      const dx = x - C;
-      const dy = y - C;
-      const len = Math.hypot(dx, dy) || 1;
-      // Labels sit on the zenith side of the arc, clear of the reference arcs further out.
-      list.push({ h, x, y, lx: x - (dx / len) * 13, ly: y - (dy / len) * 13 + 3.5 });
-    }
-    return list;
-  }, [day, sun]);
-
-  const [sx, sy] = project(current);
-  const root = useRef<SVGSVGElement>(null);
-  const marker = useRef<SVGGElement>(null);
-
-  // The one moving moment: the frame settles, today's arc draws, and the sun travels to now.
-  useLayoutEffect(() => {
-    if (!root.current) return;
-    const ctx = gsap.context(() => {
-      const arcs = gsap.utils.toArray<SVGPathElement>('[data-draw]');
-      for (const arc of arcs) {
-        const length = arc.getTotalLength();
-        gsap.set(arc, { strokeDasharray: `${length} ${length + 40}`, strokeDashoffset: reducedMotion() ? 0 : length + 4 });
-      }
-      if (reducedMotion()) return;
-      const tl = gsap.timeline();
-      tl.fromTo('[data-frame]', { opacity: 0 }, { opacity: 1, duration: 0.7, ease: 'power1.out' }, 0)
-        .to('[data-draw="ref"]', { strokeDashoffset: 0, duration: 1, ease: 'power2.out', stagger: 0.12 }, 0.15)
-        .to('[data-draw="today"]', { strokeDashoffset: 0, duration: 1.5, ease: 'power2.inOut' }, 0.45)
-        .fromTo('[data-hour]', { opacity: 0 }, { opacity: 1, duration: 0.3, stagger: 0.07 }, 0.6);
-      if (marker.current) {
-        const start = up && sun.sunrise !== null ? sun.sunrise : minutes;
-        const proxy = { m: start };
-        const place = () => {
-          const [x, y] = project(sunAt(istMoment(day, proxy.m)));
-          marker.current?.setAttribute('transform', `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
-        };
-        place();
-        tl.fromTo(marker.current, { opacity: 0 }, { opacity: 1, duration: 0.4 }, 0.6).to(
-          proxy,
-          { m: minutes, duration: up ? 1.7 : 0.01, ease: 'power2.inOut', onUpdate: place },
-          0.65,
-        );
-      }
-    }, root);
-    return () => ctx.revert();
-    // Runs once per page view; the minute-by-minute updates just move the marker.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [day]);
-
-  const ticks = useMemo(() => {
-    const list: Array<{ deg: number; x1: number; y1: number; x2: number; y2: number; major: boolean }> = [];
-    for (let deg = 0; deg < 360; deg += 5) {
-      const major = deg % 30 === 0;
-      const a = (deg * Math.PI) / 180;
-      const r1 = R + 3;
-      const r2 = R + (major ? 13 : deg % 15 === 0 ? 9 : 6);
-      list.push({ deg, major, x1: C + r1 * Math.sin(a), y1: C - r1 * Math.cos(a), x2: C + r2 * Math.sin(a), y2: C - r2 * Math.cos(a) });
-    }
-    return list;
-  }, []);
-
-  const label =
-    sun.sunrise !== null && sun.sunset !== null
-      ? `Sun path over ${SITE.name} today: it rises at ${clock(sun.sunrise)} in the ${compass(sunAt(istMoment(day, sun.sunrise)).az)}, peaks at ${Math.round(sun.peak)}° at ${clock(sun.noon)} and sets at ${clock(sun.sunset)}. It is now ${Math.abs(Math.round(current.alt))}° ${up ? 'above' : 'below'} the horizon.`
-      : `Sun path over ${SITE.name} today.`;
-
-  return (
-    <svg ref={root} viewBox="0 0 600 600" className="h-auto w-full overflow-visible" role="img" aria-label={label}>
-      <defs>
-        <radialGradient id="sun-glow">
-          <stop offset="0" stopColor="#f3c46b" stopOpacity="0.55" />
-          <stop offset="0.45" stopColor="#f3c46b" stopOpacity="0.16" />
-          <stop offset="1" stopColor="#f3c46b" stopOpacity="0" />
-        </radialGradient>
-      </defs>
-
-      <g data-frame>
-        <circle cx={C} cy={C} r={R} fill="#0e1842" stroke="rgba(190,205,255,0.42)" strokeWidth="1" />
-        {[60, 30].map((alt) => {
-          const r = (R * (90 - alt)) / 90;
-          const lx = C + r * Math.SQRT1_2 + 5;
-          const ly = C - r * Math.SQRT1_2 - 5;
-          return (
-            <g key={alt}>
-              <circle cx={C} cy={C} r={r} fill="none" stroke="rgba(190,205,255,0.16)" strokeDasharray="2 5" />
-              <text x={lx} y={ly} className="fill-[#6d7aa3] text-[10px]">
-                {alt}°
-              </text>
-            </g>
-          );
-        })}
-        <line x1={C} y1={C - R} x2={C} y2={C + R} stroke="rgba(190,205,255,0.1)" />
-        <line x1={C - R} y1={C} x2={C + R} y2={C} stroke="rgba(190,205,255,0.1)" />
-        <path d={`M${C - 5} ${C}h10M${C} ${C - 5}v10`} stroke="rgba(190,205,255,0.5)" />
-        {ticks.map((t) => (
-          <line key={t.deg} x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2} stroke={t.major ? 'rgba(190,205,255,0.6)' : 'rgba(190,205,255,0.28)'} />
-        ))}
-        {[
-          { t: 'N', deg: 0 },
-          { t: 'E', deg: 90 },
-          { t: 'S', deg: 180 },
-          { t: 'W', deg: 270 },
-        ].map(({ t, deg }) => {
-          const a = (deg * Math.PI) / 180;
-          return (
-            <text
-              key={t}
-              x={C + (R + 30) * Math.sin(a)}
-              y={C - (R + 30) * Math.cos(a) + 5}
-              textAnchor="middle"
-              className="fill-[#dfe5f7] text-[15px] font-[600]"
-            >
-              {t}
-            </text>
-          );
-        })}
-        {[30, 60, 120, 150, 210, 240, 300, 330].map((deg) => {
-          const a = (deg * Math.PI) / 180;
-          return (
-            <text key={deg} x={C + (R + 28) * Math.sin(a)} y={C - (R + 28) * Math.cos(a) + 4} textAnchor="middle" className="tnum fill-[#6d7aa3] text-[10px]">
-              {deg}
-            </text>
-          );
-        })}
-      </g>
-
-      {REFERENCE.map((r) => (
-        <g key={r.key}>
-          <path data-draw="ref" d={r.d} fill="none" stroke="rgba(190,205,255,0.34)" strokeWidth="1" />
-          <text data-frame x={r.noon[0] + 7} y={r.noon[1] + (r.key === 'june' ? -8 : 14)} className="fill-[#7f8bb3] text-[10px]">
-            {r.label}
-          </text>
-        </g>
-      ))}
-
-      {todayPath && <path data-draw="today" d={todayPath} fill="none" stroke="#f3c46b" strokeWidth="2.25" strokeLinecap="round" />}
-      {hours.map((h) => (
-        <g key={h.h} data-hour>
-          <circle cx={h.x} cy={h.y} r="2.4" fill="#f3c46b" />
-          {h.h % 2 === 0 && (
-            <text x={h.lx} y={h.ly} textAnchor="middle" className="tnum fill-[#c9b48a] text-[10px]">
-              {String(h.h).padStart(2, '0')}
-            </text>
-          )}
-        </g>
-      ))}
-
-      <g ref={marker} transform={`translate(${sx.toFixed(1)} ${sy.toFixed(1)})`}>
-        {up ? (
-          <>
-            <circle r="30" fill="url(#sun-glow)" />
-            <circle r="11" fill="none" stroke="#f3c46b" strokeOpacity="0.55" />
-            <circle r="6.5" fill="#f6d48a" />
-          </>
-        ) : (
-          <circle r="6" fill="#0a1130" stroke="#f3c46b" strokeWidth="1.5" strokeDasharray="2 2" />
-        )}
-      </g>
-    </svg>
-  );
-}
-
-function Readout({ label, value, note }: { label: string; value: string; note?: string }) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-[13px] text-[#8f9bc2]">{label}</dt>
-      <dd className="tnum mt-1 text-[26px] leading-none font-[560] tracking-[-0.01em] text-[#eef1fb]">{value}</dd>
-      {note && <dd className="mt-1.5 text-[12.5px] leading-snug text-[#8f9bc2]">{note}</dd>}
-    </div>
-  );
-}
-
 type Load = { state: 'loading' } | { state: 'ready'; teams: TeamLink[] } | { state: 'setup' } | { state: 'error'; message: string };
+
+const CARD =
+  'rounded-[20px] border border-[#e9eaf3] bg-white shadow-[0_1px_2px_rgba(16,18,40,0.04),0_22px_44px_-22px_rgba(16,18,40,0.22)]';
+const PILL = 'inline-flex items-center gap-1.5 rounded-full border border-[#e3e5ef] bg-white px-3 py-1 text-[12.5px] font-medium text-[#4a4e63]';
+const BTN_PRIMARY =
+  'home-focus inline-flex h-11 items-center justify-center gap-2 rounded-[11px] bg-[#3f3cf0] px-5 text-[14.5px] font-semibold text-white shadow-[0_8px_18px_-8px_rgba(63,60,240,0.7)] transition-colors duration-150 hover:bg-[#3431d8]';
+const BTN_SECONDARY =
+  'home-focus inline-flex h-11 items-center justify-center gap-2 rounded-[11px] border border-[#e1e3ee] bg-white px-5 text-[14.5px] font-semibold text-[#14152a] transition-colors duration-150 hover:border-[#c6c9da]';
+
+const AVATAR_COLORS = ['#3f3cf0', '#e8590c', '#0f9d76', '#c2255c', '#1971c2', '#7048e8'];
+
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? '')
+    .join('');
+}
+
+function colorFor(key: string): string {
+  let h = 0;
+  for (const c of key) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+}
 
 function progressText(team: TeamLink): string {
   if (team.members === 0) return 'No one on this team yet';
@@ -248,62 +49,368 @@ function progressText(team: TeamLink): string {
   return `${team.reported} of ${team.members} logged today`;
 }
 
-const ORBIT = { r: 15, stroke: 2.5 };
-const ORBIT_LENGTH = 2 * Math.PI * ORBIT.r;
+/* ───────────── small pieces ───────────── */
 
-/** The team's orbit: the gold arc sweeps round as its people log today. */
-function Orbit({ team }: { team: TeamLink }) {
-  const share = team.members ? Math.min(team.reported / team.members, 1) : 0;
-  const angle = share * 2 * Math.PI;
-  const px = 20 + ORBIT.r * Math.sin(angle);
-  const py = 20 - ORBIT.r * Math.cos(angle);
+function Logo() {
   return (
-    <svg viewBox="0 0 40 40" className="size-10 shrink-0" aria-hidden="true">
-      <circle cx="20" cy="20" r={ORBIT.r} fill="none" stroke="rgba(190,205,255,0.2)" strokeWidth={ORBIT.stroke} />
-      <circle cx="20" cy="20" r="2" fill="rgba(190,205,255,0.45)" />
-      {share > 0 && (
-        <circle
-          data-orbit
-          data-share={share}
-          cx="20"
-          cy="20"
-          r={ORBIT.r}
-          fill="none"
-          stroke="#f3c46b"
-          strokeWidth={ORBIT.stroke}
-          strokeLinecap="round"
-          strokeDasharray={ORBIT_LENGTH}
-          strokeDashoffset={ORBIT_LENGTH * (1 - share)}
-          transform="rotate(-90 20 20)"
-        />
-      )}
-      <circle data-planet cx={px} cy={py} r="3.6" fill={share > 0 ? '#f6d48a' : 'rgba(190,205,255,0.55)'} />
-    </svg>
+    <span className="flex items-center gap-2.5">
+      <svg viewBox="0 0 32 32" className="size-8" aria-hidden="true">
+        <rect width="32" height="32" rx="9" fill={INDIGO} />
+        <path d="M8.5 21.5a8 8 0 0 1 15 0" fill="none" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" />
+        <circle cx="21.6" cy="14.4" r="2.4" fill="#ffd166" />
+      </svg>
+      <span className="text-[16px] font-bold tracking-[-0.02em] text-[#0e0f1a]">In my arc</span>
+    </span>
   );
 }
 
-function TeamRow({ team }: { team: TeamLink }) {
-  const board = links.board(team.slug);
+function Check({ children }: { children: ReactNode }) {
   return (
-    <li className="grid grid-cols-[2.5rem_minmax(0,1fr)] items-center gap-x-5 gap-y-4 border-t border-[rgba(190,205,255,0.14)] px-1 py-6 transition-colors duration-200 hover:bg-white/[0.025] sm:px-4 md:grid-cols-[2.5rem_minmax(0,1fr)_14rem_auto]">
-      <Orbit team={team} />
-      <div className="min-w-0">
-        <a href={board} className="home-focus block truncate rounded-[4px] text-[23px] leading-[1.15] font-[600] tracking-[-0.015em] text-[#eef1fb]">
-          {team.name}
-        </a>
-        <p className="mt-1 truncate text-[13px] text-[#8f9bc2]">{displayLink(board)}</p>
+    <li className="flex items-start gap-3 text-[15px] leading-[1.5] text-[#2b2e42]">
+      <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-[8px] bg-[#eceafe] text-[#3f3cf0]" aria-hidden="true">
+        <svg viewBox="0 0 16 16" className="size-3.5">
+          <path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </span>
+      {children}
+    </li>
+  );
+}
+
+function SectionPill({ children }: { children: ReactNode }) {
+  return <span className={PILL}>{children}</span>;
+}
+
+/* ───────────── hero cards (product previews) ───────────── */
+
+const STATUS_CHIP = {
+  done: 'bg-[#e7f5ee] text-[#16704a]',
+  rework: 'bg-[#fbf1df] text-[#8a5a08]',
+  open: 'bg-[#fdeaea] text-[#b0242c]',
+} as const;
+
+function DayCard() {
+  const t = today();
+  const tasks: Array<{ title: string; time: string; status: keyof typeof STATUS_CHIP; label: string }> = [
+    { title: 'Exam monitoring', time: '1h 30m', status: 'done', label: 'Done' },
+    { title: 'Candidate mapping', time: '45m', status: 'rework', label: 'Rework' },
+    { title: 'Post-exam report', time: '30m', status: 'open', label: 'Not done' },
+  ];
+  return (
+    <div data-hero-card data-tilt="-3" className={cx(CARD, 'w-full max-w-[320px] p-5 text-left')}>
+      <div className="flex items-start gap-3">
+        <div className="w-11 shrink-0 overflow-hidden rounded-[9px] border border-[#ecedf4] text-center">
+          <div className="bg-[#e5484d] py-[2px] text-[9.5px] font-bold tracking-[0.06em] text-white">{weekdayName(t).slice(0, 3).toUpperCase()}</div>
+          <div className="py-1 text-[17px] leading-none font-bold text-[#0e0f1a]">{Number(t.slice(8))}</div>
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-[14.5px] font-semibold text-[#0e0f1a]">Your day</p>
+          <p className="text-[12.5px] text-[#80849a]">Work from home</p>
+        </div>
+        <span className="rounded-full border border-[#e6e7f0] px-2 py-0.5 text-[11.5px] font-medium text-[#4a4e63]">2h 45m</span>
       </div>
-      <p className="tnum col-start-2 text-[14px] text-[#b9c3e3] md:col-start-auto">{progressText(team)}</p>
-      <div className="col-span-2 flex flex-wrap items-center gap-x-5 gap-y-2 md:col-span-1">
-        <a
-          href={board}
-          className="home-focus inline-flex h-10 items-center justify-center rounded-full bg-[#eef1fb] px-5 text-[14px] font-[600] text-[#0a1130] transition-colors duration-150 hover:bg-white max-md:flex-1"
+      <div className="mt-5 flex items-center justify-between">
+        <p className="text-[13px] font-semibold text-[#0e0f1a]">Tasks</p>
+        <span className="text-[12.5px] font-semibold text-[#3f3cf0]">+ Add task</span>
+      </div>
+      <ul className="mt-2.5 flex flex-col gap-2">
+        {tasks.map((task) => (
+          <li key={task.title} className="flex items-center gap-2.5 rounded-[11px] bg-[#f6f7fb] px-3 py-2.5">
+            <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-[#1d2033]">{task.title}</span>
+            <span className="text-[11.5px] text-[#80849a] tabular-nums">{task.time}</span>
+            <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-semibold', STATUS_CHIP[task.status])}>{task.label}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function PulseCard({ load }: { load: Load }) {
+  const teams = load.state === 'ready' ? [...load.teams].filter((t) => t.members > 0).sort((a, b) => b.members - a.members).slice(0, 4) : [];
+  const all = load.state === 'ready' ? load.teams : [];
+  const reported = all.reduce((n, t) => n + t.reported, 0);
+  const members = all.reduce((n, t) => n + t.members, 0);
+  const share = members ? Math.round((100 * reported) / members) : 0;
+  const leader = [...teams].sort((a, b) => b.reported / b.members - a.reported / a.members)[0];
+  return (
+    <div data-hero-card data-tilt="0" className={cx(CARD, 'w-full max-w-[290px] p-5 text-left')}>
+      <div className="flex items-center justify-between rounded-[13px] bg-[#f6f7fb] px-3.5 py-3">
+        <div>
+          <p className="text-[12.5px] text-[#80849a]">Logged today</p>
+          <p className="text-[22px] leading-tight font-bold tracking-[-0.02em] text-[#0e0f1a] tabular-nums">
+            {load.state === 'ready' ? `${reported} / ${members}` : '—'}
+          </p>
+        </div>
+        <span className="rounded-full bg-[#e7f5ee] px-2 py-0.5 text-[12px] font-semibold text-[#16704a] tabular-nums">{share}%</span>
+      </div>
+      <ul className="mt-4 flex flex-col gap-3">
+        {(teams.length ? teams : [null, null, null]).map((team, i) => (
+          <li key={team?.slug ?? i}>
+            <div className="mb-1.5 flex items-center justify-between text-[12px]">
+              <span className="truncate font-medium text-[#2b2e42]">{team ? team.name : ' '}</span>
+              <span className="text-[#80849a] tabular-nums">{team ? `${team.reported}/${team.members}` : ''}</span>
+            </div>
+            <div className="h-2.5 overflow-hidden rounded-full bg-[#eef0f7]">
+              {team && (
+                <div
+                  data-bar
+                  className="h-full rounded-full"
+                  style={{ width: `${Math.max(4, (100 * team.reported) / team.members)}%`, backgroundColor: i % 2 ? '#f76707' : INDIGO }}
+                />
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-4 flex items-center gap-2.5 rounded-[12px] border border-[#ecedf4] px-3 py-2.5">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-[8px] bg-[#eceafe] text-[#3f3cf0]" aria-hidden="true">
+          <svg viewBox="0 0 16 16" className="size-4">
+            <path d="M3 13V8m5 5V4m5 9V6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          </svg>
+        </span>
+        <p className="text-[12px] leading-snug text-[#4a4e63]">
+          {leader && leader.reported > 0 ? `${leader.name}’s team is furthest along today.` : 'Bars fill up as people log their day.'}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function RatingCard() {
+  return (
+    <div data-hero-card data-tilt="3" className={cx(CARD, 'w-full max-w-[310px] p-5 text-left')}>
+      <div className="flex items-center gap-3">
+        <span className="flex size-9 items-center justify-center rounded-[10px] bg-[#f3f2ff] text-[#3f3cf0]" aria-hidden="true">
+          <svg viewBox="0 0 16 16" className="size-[18px]">
+            <path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6 4.2 13.6l.7-4.3-3.1-3 4.3-.6z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+          </svg>
+        </span>
+        <div>
+          <p className="text-[14.5px] font-semibold text-[#0e0f1a]">How a day is rated</p>
+          <p className="text-[12.5px] text-[#80849a]">One verdict for the whole day</p>
+        </div>
+      </div>
+      <ul className="mt-4 flex flex-col gap-1.5">
+        {VERDICTS.map((v) => (
+          <li key={v.key} className="flex items-center gap-2.5 rounded-[11px] bg-[#f6f7fb] px-3 py-2">
+            <span className="size-2.5 shrink-0 rounded-[3px]" style={{ backgroundColor: v.ink }} />
+            <span className="flex-1 text-[13px] font-medium text-[#1d2033]">{v.label}</span>
+            <span className="text-[12px] font-semibold text-[#80849a] tabular-nums">{v.points} pts</span>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {BROWNIES.map((b) => (
+          <span key={b.key} className="rounded-full border border-[#efdcb8] bg-[#fdf6e9] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#7a5312]">
+            +1 {b.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ───────────── feature previews ───────────── */
+
+function AddPeopleMock() {
+  const people = [
+    { name: 'Riya Kapoor', state: 'Logged today', tone: 'bg-[#e7f5ee] text-[#16704a]' },
+    { name: 'Kabir Mehta', state: 'On leave', tone: 'bg-[#f1f2f7] text-[#5b5f73]' },
+    { name: 'Ananya Rao', state: 'Logged today', tone: 'bg-[#e7f5ee] text-[#16704a]' },
+    { name: 'Vikram Singh', state: 'Not yet', tone: 'bg-[#fdeaea] text-[#b0242c]' },
+  ];
+  return (
+    <div className={cx(CARD, 'mx-auto w-full max-w-[440px] p-6')}>
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-[16px] font-semibold text-[#0e0f1a]">Add employees</p>
+          <p className="mt-0.5 text-[13px] text-[#80849a]">One name per line. They can log straight away.</p>
+        </div>
+        <span className="text-[18px] leading-none text-[#a3a6b8]" aria-hidden="true">
+          ×
+        </span>
+      </div>
+      <p className="mt-5 mb-1.5 text-[13px] font-medium text-[#2b2e42]">Names</p>
+      <div className="flex gap-2">
+        <div className="flex-1 rounded-[10px] border border-[#e1e3ee] px-3 py-2 text-[13px] leading-[1.55] text-[#2b2e42]">
+          Riya Kapoor
+          <br />
+          Kabir Mehta
+          <br />
+          <span className="text-[#a3a6b8]">Ananya Rao</span>
+        </div>
+        <span className="self-end rounded-[10px] bg-[#3f3cf0] px-3.5 py-2 text-[13px] font-semibold whitespace-nowrap text-white">Add 3</span>
+      </div>
+      <p className="mt-5 text-[13px] font-medium text-[#2b2e42]">4 people on this team</p>
+      <ul className="mt-2 flex flex-col">
+        {people.map((p) => (
+          <li key={p.name} className="flex items-center gap-3 border-b border-[#f0f1f6] py-2.5 last:border-b-0">
+            <span
+              className="flex size-8 items-center justify-center rounded-full text-[11.5px] font-bold text-white"
+              style={{ backgroundColor: colorFor(p.name) }}
+            >
+              {initials(p.name)}
+            </span>
+            <span className="flex-1 text-[13.5px] font-medium text-[#1d2033]">{p.name}</span>
+            <span className={cx('rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold', p.tone)}>{p.state}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function RateMock() {
+  const picked = 'over_performed';
+  return (
+    <div className={cx(CARD, 'mx-auto w-full max-w-[460px] p-6')}>
+      <div className="flex items-center gap-3">
+        <span className="flex size-9 items-center justify-center rounded-full text-[12px] font-bold text-white" style={{ backgroundColor: colorFor('Ananya Rao') }}>
+          AR
+        </span>
+        <div className="flex-1">
+          <p className="text-[15px] font-semibold text-[#0e0f1a]">Ananya Rao</p>
+          <p className="text-[12.5px] text-[#80849a]">Full day, 3 tasks, 6h 10m</p>
+        </div>
+        <span className="rounded-full bg-[#e7f5ee] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#16704a]">Reported</span>
+      </div>
+      <div className="mt-5 grid gap-2 sm:grid-cols-[1fr_170px]">
+        <ul className="flex flex-col gap-1.5">
+          {['Seat plan review', 'Biometric checks', 'Incident report'].map((t, i) => (
+            <li key={t} className="flex items-center gap-2 rounded-[10px] bg-[#f6f7fb] px-3 py-2 text-[12.5px] font-medium text-[#1d2033]">
+              <span className="flex-1 truncate">{t}</span>
+              <span className={cx('rounded-full px-1.5 py-0.5 text-[10.5px] font-semibold', i === 2 ? STATUS_CHIP.rework : STATUS_CHIP.done)}>
+                {i === 2 ? 'Rework' : 'Done'}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <div className="flex flex-col gap-1">
+          {VERDICTS.map((v) => {
+            const on = v.key === picked;
+            return (
+              <span
+                key={v.key}
+                className="flex items-center gap-1.5 rounded-[7px] border px-2 py-[3px] text-[11px] font-semibold"
+                style={on ? { backgroundColor: v.bg, borderColor: v.ink, color: v.ink } : { borderColor: '#ecedf4', color: '#80849a' }}
+              >
+                <span className="size-2 rounded-[2px]" style={{ backgroundColor: v.line }} />
+                {v.label}
+              </span>
+            );
+          })}
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        {BROWNIES.map((b, i) => (
+          <span
+            key={b.key}
+            className={cx(
+              'rounded-full border px-2.5 py-0.5 text-[11.5px] font-semibold',
+              i === 0 ? 'border-[#efdcb8] bg-[#fdf6e9] text-[#7a5312]' : 'border-[#ecedf4] text-[#a3a6b8]',
+            )}
+          >
+            {b.label}
+          </span>
+        ))}
+        <span className="ml-auto text-[12px] font-semibold text-[#3f3cf0] tabular-nums">5 points</span>
+      </div>
+    </div>
+  );
+}
+
+/* ───────────── FAQ ───────────── */
+
+const FAQ = [
+  {
+    q: 'Do I need an account to log my day?',
+    a: 'No. Open your team’s board from the list on this page, pick your name, and add your tasks. Your browser remembers who you are on that team.',
+  },
+  {
+    q: 'Can I add or fix an earlier day?',
+    a: 'Team boards are open for today. The super admin can open a backfill window for recent days. Your manager can change any past day for you.',
+  },
+  {
+    q: 'Who rates my day, and how are points counted?',
+    a: 'Your manager (or the super admin) gives one verdict for the whole day: Not up to the mark is 1 point, up to Extraordinary at 5. Overtime, working a holiday and saving the day each add a brownie worth 1 point.',
+  },
+  {
+    q: 'Why does the manager page ask for the password every time?',
+    a: 'Sign-ins aren’t remembered on purpose. Every time a manager or the super admin opens their page, a reload or a new tab included, they enter the password again.',
+  },
+  {
+    q: 'Can I attach files to a task?',
+    a: 'Yes, one file per task, up to 10 MB. It opens from that task on the board.',
+  },
+  {
+    q: 'Which time zone does the board use?',
+    a: 'India Standard Time. The day rolls over at midnight IST for everyone, wherever they are.',
+  },
+];
+
+function FaqItem({ q, a, open, onToggle, id }: { q: string; a: string; open: boolean; onToggle: () => void; id: string }) {
+  return (
+    <div className="rounded-[14px] border border-[#e9eaf3] bg-white">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-controls={id}
+        className="home-focus flex w-full items-center justify-between gap-4 rounded-[14px] px-5 py-4 text-left text-[15px] font-semibold text-[#14152a]"
+      >
+        {q}
+        <span className={cx('text-[20px] leading-none text-[#3f3cf0] transition-transform duration-300', open && 'rotate-45')} aria-hidden="true">
+          +
+        </span>
+      </button>
+      <div id={id} className={cx('grid transition-[grid-template-rows] duration-300 ease-out', open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]')}>
+        <div className="overflow-hidden">
+          <p className="px-5 pb-5 text-[14.5px] leading-[1.6] text-[#5b5f73]">{a}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ───────────── teams ───────────── */
+
+function TeamCard({ team }: { team: TeamLink }) {
+  const board = links.board(team.slug);
+  const share = team.members ? Math.min(team.reported / team.members, 1) : 0;
+  return (
+    <li className={cx(CARD, 'flex flex-col p-5 transition-transform duration-200 hover:-translate-y-0.5')}>
+      <div className="flex items-center gap-3">
+        <span
+          className="flex size-10 shrink-0 items-center justify-center rounded-full text-[13px] font-bold text-white"
+          style={{ backgroundColor: colorFor(team.slug) }}
+          aria-hidden="true"
         >
+          {initials(team.name)}
+        </span>
+        <div className="min-w-0">
+          <a href={board} className="home-focus block truncate rounded-[4px] text-[16.5px] font-semibold tracking-[-0.01em] text-[#0e0f1a] hover:text-[#3f3cf0]">
+            {team.name}
+          </a>
+          <p className="truncate text-[12.5px] text-[#80849a]">{displayLink(board)}</p>
+        </div>
+      </div>
+      <div className="mt-5">
+        <div className="mb-1.5 flex items-center justify-between text-[12.5px]">
+          <span className="text-[#4a4e63]">{progressText(team)}</span>
+          <span className="font-semibold text-[#14152a] tabular-nums">{Math.round(share * 100)}%</span>
+        </div>
+        <div className="h-2 overflow-hidden rounded-full bg-[#eef0f7]">
+          <div data-team-bar className="h-full rounded-full bg-[#3f3cf0]" style={{ width: `${share * 100}%` }} />
+        </div>
+      </div>
+      <div className="mt-5 flex items-center gap-4">
+        <a href={board} className={cx(BTN_PRIMARY, 'h-10 flex-1 text-[14px]')}>
           Open board
         </a>
         <a
           href={links.rating(team.slug)}
-          className="home-focus rounded-[4px] text-[14px] text-[#9aa6cc] underline decoration-[rgba(190,205,255,0.3)] underline-offset-[5px] transition-colors duration-150 hover:text-[#eef1fb] hover:decoration-[#eef1fb]"
+          className="home-focus rounded-[4px] text-[13.5px] font-medium text-[#5b5f73] underline decoration-[#d4d6e3] underline-offset-[5px] hover:text-[#14152a] hover:decoration-[#14152a]"
         >
           Manager sign-in
         </a>
@@ -312,30 +419,29 @@ function TeamRow({ team }: { team: TeamLink }) {
   );
 }
 
-function RowSkeleton() {
+function TeamSkeleton() {
   return (
-    <li className="grid grid-cols-[2.5rem_minmax(0,1fr)] items-center gap-5 border-t border-[rgba(190,205,255,0.14)] px-1 py-6 sm:px-4 md:grid-cols-[2.5rem_minmax(0,1fr)_14rem_auto]">
-      <div className="size-10 animate-pulse rounded-full bg-white/[0.06]" />
-      <div>
-        <div className="h-5 w-44 animate-pulse rounded-[4px] bg-white/[0.08]" />
-        <div className="mt-2.5 h-3 w-32 animate-pulse rounded-[4px] bg-white/[0.05]" />
+    <li className={cx(CARD, 'p-5')}>
+      <div className="flex items-center gap-3">
+        <div className="size-10 animate-pulse rounded-full bg-[#eef0f7]" />
+        <div className="flex-1">
+          <div className="h-4 w-32 animate-pulse rounded bg-[#eef0f7]" />
+          <div className="mt-2 h-3 w-40 animate-pulse rounded bg-[#f3f4f9]" />
+        </div>
       </div>
-      <div className="hidden h-4 w-36 animate-pulse rounded-[4px] bg-white/[0.05] md:block" />
-      <div className="hidden h-10 w-32 animate-pulse rounded-full bg-white/[0.08] md:block" />
+      <div className="mt-6 h-2 animate-pulse rounded-full bg-[#eef0f7]" />
+      <div className="mt-6 h-10 animate-pulse rounded-[11px] bg-[#eef0f7]" />
     </li>
   );
 }
 
+/* ───────────── page ───────────── */
+
 export function Home() {
   const root = useRef<HTMLDivElement>(null);
-  const list = useRef<HTMLUListElement>(null);
-  const mountedAt = useRef(performance.now());
   const [load, setLoad] = useState<Load>({ state: 'loading' });
-  const [now, setNow] = useState(() => new Date());
-  const day = today();
-  const sun = useMemo(() => sunDay(day), [day]);
-  const current = sunAt(now);
-  const up = current.alt >= HORIZON;
+  const [faq, setFaq] = useState<number | null>(0);
+  const t = today();
 
   const fetchTeams = useCallback(async () => {
     setLoad({ state: 'loading' });
@@ -349,160 +455,278 @@ export function Home() {
   }, []);
 
   useEffect(() => {
-    document.title = `In my arc — ${APP.org}`;
+    document.title = `In my arc — ${APP.org} daily log`;
     void fetchTeams();
-    const timer = window.setInterval(() => setNow(new Date()), 30_000);
-    return () => window.clearInterval(timer);
   }, [fetchTeams]);
 
+  // One entrance: the headline settles, then the three cards rise into place.
   useLayoutEffect(() => {
     if (reducedMotion() || !root.current) return;
     const ctx = gsap.context(() => {
-      gsap.fromTo('[data-title]', { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.9, ease: 'power3.out', delay: 0.15 });
-      gsap.fromTo('[data-settle]', { opacity: 0 }, { opacity: 1, duration: 0.7, ease: 'power1.out', stagger: 0.09, delay: 0.45 });
+      const tl = gsap.timeline({ defaults: { ease: 'power3.out' } });
+      tl.fromTo('[data-hero-line]', { opacity: 0, y: 22 }, { opacity: 1, y: 0, duration: 0.8, stagger: 0.1 })
+        .fromTo('[data-hero-fade]', { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.6, stagger: 0.08 }, 0.25)
+        .fromTo(
+          '[data-hero-card]',
+          { opacity: 0, y: 56, rotate: (_i: number, el: Element) => Number((el as HTMLElement).dataset.tilt ?? 0) },
+          { opacity: 1, y: 0, rotate: 0, duration: 1, stagger: 0.12 },
+          0.45,
+        );
     }, root);
     return () => ctx.revert();
   }, []);
 
-  // Each orbit sweeps to today's share once the list arrives (after the sky, on a fresh load).
+  // Bars grow once the real numbers arrive.
   useLayoutEffect(() => {
-    if (load.state !== 'ready' || !list.current) return;
+    if (load.state !== 'ready' || reducedMotion() || !root.current) return;
     const ctx = gsap.context(() => {
-      if (reducedMotion()) return;
-      const wait = Math.max(0, 1.2 - (performance.now() - mountedAt.current) / 1000);
-      gsap.fromTo(list.current, { opacity: 0 }, { opacity: 1, duration: 0.5, ease: 'power1.out', delay: Math.max(0, wait - 0.4) });
-      for (const [i, orbit] of gsap.utils.toArray<SVGCircleElement>('[data-orbit]').entries()) {
-        gsap.fromTo(
-          orbit,
-          { strokeDashoffset: ORBIT_LENGTH },
-          { strokeDashoffset: ORBIT_LENGTH * (1 - Number(orbit.dataset.share ?? 0)), duration: 1.2, ease: 'power3.out', delay: wait + i * 0.08 },
-        );
-      }
-    }, list);
+      gsap.from('[data-bar], [data-team-bar]', { width: 0, duration: 1.1, ease: 'power3.out', stagger: 0.06, delay: 0.5 });
+    }, root);
     return () => ctx.revert();
   }, [load]);
 
-  const teams = load.state === 'ready' ? load.teams : [];
-  const dayLength = sun.sunrise !== null && sun.sunset !== null ? sun.sunset - sun.sunrise : null;
+  const teams = useMemo(() => (load.state === 'ready' ? load.teams : []), [load]);
+  const reported = teams.reduce((n, x) => n + x.reported, 0);
+  const members = teams.reduce((n, x) => n + x.members, 0);
 
   return (
-    <div ref={root} className="home min-h-screen bg-[#0a1130] text-[#eef1fb]">
-      <div className="mx-auto flex min-h-screen w-full max-w-[1160px] flex-col px-5 sm:px-8">
-        <header className="flex items-center justify-between py-6">
-          <span className="text-[15px] font-[620] tracking-[0.01em]">{APP.org}</span>
-          <a
-            href="/admin"
-            className="home-focus rounded-[4px] text-[14px] text-[#9aa6cc] underline decoration-transparent underline-offset-[5px] transition-colors duration-150 hover:text-[#eef1fb] hover:decoration-[rgba(190,205,255,0.4)]"
-          >
-            Super admin
+    <div ref={root} className="home min-h-screen overflow-x-clip bg-[#f6f7fb] font-sans text-[#14152a]">
+      {/* hero */}
+      <div className="relative bg-[radial-gradient(1100px_560px_at_50%_-8%,#dfe1fc_0%,rgba(223,225,252,0.55)_42%,rgba(246,247,251,0)_75%)]">
+        <header className="mx-auto flex w-full max-w-[1200px] items-center justify-between px-5 py-5 sm:px-8">
+          <a href="/" className="home-focus rounded-[8px]">
+            <Logo />
           </a>
+          <nav className="hidden items-center gap-8 text-[14px] font-medium text-[#4a4e63] md:flex" aria-label="Sections">
+            <a href="#how" className="home-focus rounded-[4px] hover:text-[#0e0f1a]">
+              How it works
+            </a>
+            <a href="#teams" className="home-focus rounded-[4px] hover:text-[#0e0f1a]">
+              Teams
+            </a>
+            <a href="#faq" className="home-focus rounded-[4px] hover:text-[#0e0f1a]">
+              FAQ
+            </a>
+          </nav>
+          <div className="flex items-center gap-3">
+            <a href="/admin" className="home-focus hidden rounded-[4px] text-[14px] font-medium text-[#4a4e63] hover:text-[#0e0f1a] sm:block">
+              Super admin
+            </a>
+            <a href="#teams" className={cx(BTN_PRIMARY, 'h-10 px-4 text-[14px]')}>
+              Find your team
+            </a>
+          </div>
         </header>
 
-        <section className="grid items-center gap-x-14 gap-y-8 pt-4 pb-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] lg:pt-10" aria-labelledby="home-title">
-          <div className="order-2 lg:order-1">
-            <h1
-              id="home-title"
-              data-title
-              className="text-[clamp(52px,8.4vw,104px)] leading-[0.92] font-[640] tracking-[-0.035em] [font-stretch:125%]"
-            >
-              In my arc
-            </h1>
-            <p data-settle className="mt-7 text-[19px] font-[560] tracking-[-0.005em]">
-              {weekdayName(day)}, {longDate(day).replace(/ \d{4}$/, '')}
-            </p>
-            <p data-settle className="mt-2 max-w-[44ch] text-[16px] leading-[1.55] text-balance text-[#b9c3e3]">
-              Find your team, then log today’s work on its board.
-            </p>
-            <dl data-settle className="mt-9 grid max-w-[440px] grid-cols-2 gap-x-10 gap-y-6 border-t border-[rgba(190,205,255,0.16)] pt-6">
-              <Readout label="Sunrise" value={sun.sunrise !== null ? clock(sun.sunrise) : '—'} />
-              <Readout label="Solar noon" value={clock(sun.noon)} note={`${Math.round(sun.peak)}° high`} />
-              <Readout label="Sunset" value={sun.sunset !== null ? clock(sun.sunset) : '—'} note={dayLength !== null ? `${Math.floor(dayLength / 60)} h ${Math.round(dayLength % 60)} m of daylight` : undefined} />
-              <Readout
-                label="Sun now"
-                value={`${Math.round(current.alt)}°`}
-                note={up ? `up in the ${compass(current.az)}` : 'below the horizon'}
-              />
-            </dl>
+        <section className="mx-auto w-full max-w-[1200px] px-5 pt-12 pb-20 text-center sm:px-8 sm:pt-16" aria-labelledby="home-title">
+          <div data-hero-fade className={cx(PILL, 'mx-auto')}>
+            <span className="relative flex size-2">
+              <span className="absolute inline-flex size-full animate-ping rounded-full bg-[#22c55e] opacity-60" />
+              <span className="relative inline-flex size-2 rounded-full bg-[#16a34a]" />
+            </span>
+            {load.state === 'ready' && members > 0
+              ? `${reported} of ${members} people have logged today`
+              : `${weekdayName(t)}, ${longDate(t).replace(/ \d{4}$/, '')}`}
           </div>
-          <figure className="order-1 mx-auto w-full max-w-[560px] lg:order-2">
-            <SunChart day={day} now={now} />
-            <figcaption data-settle className="mx-auto mt-3 max-w-[46ch] text-center text-[12.5px] leading-[1.5] text-[#7f8bb3]">
-              The sun’s path over {SITE.name} today in gold, with the solstices and equinoxes for comparison. The glowing dot is the sun right now.
-            </figcaption>
-          </figure>
-        </section>
-
-        <section className="mt-12 mb-12" aria-labelledby="teams-title">
-          <div data-settle className="mb-4 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-1 sm:px-4">
-            <h2 id="teams-title" className="text-[21px] font-[620] tracking-[-0.01em]">
-              Teams
-            </h2>
-            {load.state === 'ready' && teams.length > 0 && (
-              <p className="tnum text-[13px] text-[#8f9bc2]">
-                {teams.reduce((n, t) => n + t.reported, 0)} of {teams.reduce((n, t) => n + t.members, 0)} people have logged today
-              </p>
-            )}
-          </div>
-
-          {load.state === 'loading' && (
-            <ul className="border-b border-[rgba(190,205,255,0.14)]" aria-label="Loading teams">
-              <RowSkeleton />
-              <RowSkeleton />
-              <RowSkeleton />
-            </ul>
-          )}
-
-          {load.state === 'ready' && teams.length > 0 && (
-            <ul ref={list} className="border-b border-[rgba(190,205,255,0.14)]">
-              {teams.map((team) => (
-                <TeamRow key={team.slug} team={team} />
-              ))}
-            </ul>
-          )}
-
-          {load.state === 'ready' && teams.length === 0 && (
-            <div className="border-y border-[rgba(190,205,255,0.14)] px-1 py-10 text-center sm:px-4">
-              <p className="text-[18px] font-[600]">No teams yet</p>
-              <p className="mx-auto mt-2 max-w-[46ch] text-[15px] leading-[1.55] text-[#b9c3e3]">
-                The super admin creates each manager’s team and adds its people. Team links show up here as soon as they exist.
-              </p>
-              <a
-                href="/admin"
-                className="home-focus mt-6 inline-flex h-10 items-center rounded-full bg-[#eef1fb] px-5 text-[14px] font-[600] text-[#0a1130] transition-colors duration-150 hover:bg-white"
-              >
-                Open super admin
-              </a>
-            </div>
-          )}
-
-          {load.state === 'error' && (
-            <div className="border-y border-[rgba(190,205,255,0.14)] px-1 py-10 text-center sm:px-4">
-              <p className="text-[18px] font-[600]">The team list didn’t load</p>
-              <p className="mx-auto mt-2 max-w-[48ch] text-[15px] leading-[1.55] text-[#b9c3e3]">{load.message}</p>
-              <button
-                type="button"
-                onClick={() => void fetchTeams()}
-                className="home-focus mt-6 inline-flex h-10 items-center rounded-full border border-[rgba(190,205,255,0.4)] px-5 text-[14px] font-[600] text-[#eef1fb] transition-colors duration-150 hover:border-[#eef1fb]"
-              >
-                Try again
-              </button>
-            </div>
-          )}
-
-          {load.state === 'setup' && (
-            <div className="font-sans text-ink">
-              <SetupNotice />
-            </div>
-          )}
-        </section>
-
-        <footer className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-[rgba(190,205,255,0.14)] py-6 text-[13px] text-[#8f9bc2]">
-          <p>Internal to {APP.org}.</p>
-          <p className="tnum">
-            Sky for {SITE.name}, {SITE.lat}° N {SITE.lon}° E. India time, now {clock(istMinutes(now))}.
+          <h1 id="home-title" className="mx-auto mt-6 max-w-[14ch] text-[clamp(42px,6.6vw,78px)] leading-[1.02] font-semibold tracking-[-0.045em] text-[#0e0f1a]">
+            <span data-hero-line className="block">
+              Every workday,
+            </span>
+            <span data-hero-line className="block">
+              in one place.
+            </span>
+          </h1>
+          <p data-hero-fade className="mx-auto mt-6 max-w-[56ch] text-[17px] leading-[1.6] text-balance text-[#5b5f73]">
+            Log tasks, time and attendance in a minute. Managers rate the whole day, and everyone can see how their week is going.
           </p>
-        </footer>
+          <div data-hero-fade className="mt-8 flex flex-wrap items-center justify-center gap-3">
+            <a href="#teams" className={BTN_PRIMARY}>
+              Find your team
+            </a>
+            <a href="#how" className={BTN_SECONDARY}>
+              See how it works
+            </a>
+          </div>
+
+          <div className="relative mx-auto mt-16 grid max-w-[1040px] grid-cols-1 items-start justify-items-center gap-6 md:grid-cols-2 lg:grid-cols-3">
+            <DayCard />
+            <div className="lg:mt-12">
+              <PulseCard load={load} />
+            </div>
+            <div className="hidden md:block">
+              <RatingCard />
+            </div>
+          </div>
+        </section>
       </div>
+
+      {/* teams strip */}
+      {teams.length > 0 && (
+        <section className="mx-auto w-full max-w-[1200px] px-5 pb-6 text-center sm:px-8" aria-label="Teams using the daily log">
+          <p className="text-[13px] font-medium text-[#80849a]">Teams on the daily log</p>
+          <ul className="mt-4 flex flex-wrap items-center justify-center gap-x-8 gap-y-3">
+            {teams.map((team) => (
+              <li key={team.slug} className="flex items-center gap-2 text-[15px] font-semibold text-[#9a9db0]">
+                <span className="size-2 rounded-full" style={{ backgroundColor: colorFor(team.slug) }} />
+                {team.name}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* features */}
+      <section className="mx-auto grid w-full max-w-[1200px] items-center gap-12 px-5 py-20 sm:px-8 lg:grid-cols-2 lg:gap-16" aria-labelledby="feature-admin">
+        <div>
+          <SectionPill>For the super admin</SectionPill>
+          <h2 id="feature-admin" className="mt-5 max-w-[16ch] text-[clamp(30px,3.6vw,44px)] leading-[1.08] font-semibold tracking-[-0.035em] text-balance text-[#0e0f1a]">
+            Bring every team on board in minutes
+          </h2>
+          <p className="mt-5 max-w-[48ch] text-[16px] leading-[1.6] text-[#5b5f73]">
+            Create a manager, give them a link name and a password, and paste in their people. Employees don’t need accounts: their team’s board link is
+            all they use.
+          </p>
+          <ul className="mt-7 flex flex-col gap-3.5">
+            <Check>One board link per team, one rating page per manager</Check>
+            <Check>Add, move or deactivate employees whenever you need to</Check>
+            <Check>Every team on one board, with combined stats and reports</Check>
+          </ul>
+        </div>
+        <AddPeopleMock />
+      </section>
+
+      <section className="mx-auto grid w-full max-w-[1200px] items-center gap-12 px-5 pb-20 sm:px-8 lg:grid-cols-2 lg:gap-16" aria-labelledby="feature-manager">
+        <div className="order-2 lg:order-1">
+          <RateMock />
+        </div>
+        <div className="order-1 lg:order-2">
+          <SectionPill>For managers</SectionPill>
+          <h2 id="feature-manager" className="mt-5 max-w-[16ch] text-[clamp(30px,3.6vw,44px)] leading-[1.08] font-semibold tracking-[-0.035em] text-balance text-[#0e0f1a]">
+            Rate the whole day, not every task
+          </h2>
+          <p className="mt-5 max-w-[48ch] text-[16px] leading-[1.6] text-[#5b5f73]">
+            Five clear verdicts and three brownies, given right on the day’s board. The day’s report downloads as a PDF in one click.
+          </p>
+          <ul className="mt-7 flex flex-col gap-3.5">
+            <Check>Verdicts from Not up to the mark to Extraordinary</Check>
+            <Check>Brownies for overtime, working a holiday and saving the day</Check>
+            <Check>Weekly and monthly standings, by verdict or by points</Check>
+          </ul>
+        </div>
+      </section>
+
+      {/* how it works */}
+      <section id="how" className="scroll-mt-6 border-y border-[#e9eaf3] bg-white" aria-labelledby="how-title">
+        <div className="mx-auto w-full max-w-[1200px] px-5 py-20 sm:px-8">
+          <div className="text-center">
+            <SectionPill>How it works</SectionPill>
+            <h2 id="how-title" className="mt-5 text-[clamp(30px,3.6vw,44px)] leading-[1.08] font-semibold tracking-[-0.035em] text-balance text-[#0e0f1a]">
+              Three steps, every day
+            </h2>
+          </div>
+          <ol className="mt-12 grid gap-5 md:grid-cols-3">
+            {[
+              { t: 'The super admin sets up teams', d: 'Each manager gets a team board link and a password. Their people are added by name.' },
+              { t: 'Everyone logs their day', d: 'Open your team’s board, pick your name, mark attendance and add tasks with time and status.' },
+              { t: 'Managers rate it', d: 'One verdict for the whole day, brownies where they’re earned, and a graph that shows the trend.' },
+            ].map((s, i) => (
+              <li key={s.t} className="rounded-[18px] border border-[#e9eaf3] bg-[#f9f9fd] p-6">
+                <span className="flex size-9 items-center justify-center rounded-full bg-[#3f3cf0] text-[14px] font-bold text-white">{i + 1}</span>
+                <p className="mt-5 text-[17px] font-semibold tracking-[-0.01em] text-[#0e0f1a]">{s.t}</p>
+                <p className="mt-2 text-[14.5px] leading-[1.6] text-[#5b5f73]">{s.d}</p>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </section>
+
+      {/* teams */}
+      <section id="teams" className="mx-auto w-full max-w-[1200px] scroll-mt-6 px-5 py-20 sm:px-8" aria-labelledby="teams-title">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <SectionPill>Teams</SectionPill>
+            <h2 id="teams-title" className="mt-5 text-[clamp(30px,3.6vw,44px)] leading-[1.08] font-semibold tracking-[-0.035em] text-balance text-[#0e0f1a]">
+              Find your team
+            </h2>
+            <p className="mt-3 max-w-[52ch] text-[16px] leading-[1.6] text-[#5b5f73]">
+              Open your team’s board to log today. Managers sign in from the same card.
+            </p>
+          </div>
+        </div>
+
+        {load.state === 'loading' && (
+          <ul className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3" aria-label="Loading teams">
+            <TeamSkeleton />
+            <TeamSkeleton />
+            <TeamSkeleton />
+          </ul>
+        )}
+        {load.state === 'ready' && teams.length > 0 && (
+          <ul className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {teams.map((team) => (
+              <TeamCard key={team.slug} team={team} />
+            ))}
+          </ul>
+        )}
+        {load.state === 'ready' && teams.length === 0 && (
+          <div className={cx(CARD, 'mt-10 px-6 py-12 text-center')}>
+            <p className="text-[18px] font-semibold text-[#0e0f1a]">No teams yet</p>
+            <p className="mx-auto mt-2 max-w-[46ch] text-[15px] leading-[1.6] text-[#5b5f73]">
+              The super admin creates each manager’s team and adds its people. Team links show up here as soon as they exist.
+            </p>
+            <a href="/admin" className={cx(BTN_PRIMARY, 'mt-6')}>
+              Open super admin
+            </a>
+          </div>
+        )}
+        {load.state === 'error' && (
+          <div className={cx(CARD, 'mt-10 px-6 py-12 text-center')}>
+            <p className="text-[18px] font-semibold text-[#0e0f1a]">The team list didn’t load</p>
+            <p className="mx-auto mt-2 max-w-[48ch] text-[15px] leading-[1.6] text-[#5b5f73]">{load.message}</p>
+            <button type="button" onClick={() => void fetchTeams()} className={cx(BTN_SECONDARY, 'mt-6')}>
+              Try again
+            </button>
+          </div>
+        )}
+        {load.state === 'setup' && (
+          <div className="mt-10">
+            <SetupNotice />
+          </div>
+        )}
+      </section>
+
+      {/* FAQ */}
+      <section id="faq" className="mx-auto w-full max-w-[860px] scroll-mt-6 px-5 pb-24 sm:px-8" aria-labelledby="faq-title">
+        <div className="text-center">
+          <SectionPill>Questions</SectionPill>
+          <h2 id="faq-title" className="mt-5 text-[clamp(30px,3.6vw,44px)] leading-[1.08] font-semibold tracking-[-0.035em] text-balance text-[#0e0f1a]">
+            Everything you need to know
+          </h2>
+        </div>
+        <div className="mt-10 flex flex-col gap-3">
+          {FAQ.map((item, i) => (
+            <FaqItem key={item.q} id={`faq-${i}`} q={item.q} a={item.a} open={faq === i} onToggle={() => setFaq(faq === i ? null : i)} />
+          ))}
+        </div>
+      </section>
+
+      <footer className="border-t border-[#e9eaf3] bg-white">
+        <div className="mx-auto flex w-full max-w-[1200px] flex-wrap items-center justify-between gap-4 px-5 py-8 text-[13.5px] text-[#80849a] sm:px-8">
+          <div className="flex items-center gap-3">
+            <Logo />
+            <span>Internal to {APP.org}.</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-6">
+            <a href="#teams" className="home-focus rounded-[4px] hover:text-[#14152a]">
+              Teams
+            </a>
+            <a href="/admin" className="home-focus rounded-[4px] hover:text-[#14152a]">
+              Super admin
+            </a>
+            <span>Days follow India time (IST).</span>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
