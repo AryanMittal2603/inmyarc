@@ -26,8 +26,10 @@ Same fields, limits, validations, verdict logic and colours as the original. The
 
 The repo deploys from `main`. Until these are done the pages show an "A few steps left" checklist:
 
-1. **Database:** Project → **Storage** → **Create Database** → **Neon** → connect it to this project. Vercel adds `DATABASE_URL`. Tables are created (and upgraded) automatically on first use.
-2. **File storage:** **Storage** → **Create** → **Blob** → access **Private** → connect. Make sure `BLOB_READ_WRITE_TOKEN` is in the project's environment variables (browser uploads need it).
+1. **Database:** Project → **Storage** → **Create Database** → **Neon** → connect it to this project (Production). Vercel adds `DATABASE_URL`. Tables are created (and upgraded) automatically on first use.
+2. **File storage:** **Storage** → **Create** → **Blob** → access **Private** → connect it to this project (Production). Vercel adds `BLOB_READ_WRITE_TOKEN` (browser uploads need it).
+
+   A custom prefix is fine: `INMYARCSTORAGE_DATABASE_URL` and `INMYARCSTORAGE_READ_WRITE_TOKEN` are found too. Storage connected after the last deploy only shows up after a redeploy.
 3. **Super admin password:** **Settings** → **Environment Variables** → `ADMIN_PASSCODE`.
 4. **Redeploy**, open `/admin` and sign in.
 5. **Managers** tab: add each manager with a name, a link name and a password (or **Generate** one). Copy the sign-in details it shows and send them to the manager privately — the password isn't shown again, but you can set a new one any time.

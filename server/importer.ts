@@ -237,6 +237,7 @@ export async function importFromSupabase(
       const pathname = `task-files/${e.attachment_path}`;
       await put(pathname, body, {
         access: 'private',
+        token: env.blobToken(),
         contentType: e.attachment_type || 'application/octet-stream',
         addRandomSuffix: false,
         allowOverwrite: true,

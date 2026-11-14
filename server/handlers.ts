@@ -740,6 +740,7 @@ export async function uploadToken(ctx: Ctx): Promise<Response> {
   const result = await handleUpload({
     body,
     request: ctx.request,
+    token: env.blobToken(),
     onBeforeGenerateToken: async (pathname) => {
       if (!ATTACHMENT_PATH.test(pathname)) throw new Error('That file name is not allowed.');
       return { maximumSizeInBytes: LIMITS.fileBytes, addRandomSuffix: false, allowOverwrite: false };
@@ -762,6 +763,7 @@ export async function getFile(ctx: Ctx): Promise<Response> {
 
   const result = await get(row.attachment_path, {
     access: 'private',
+    token: env.blobToken() || undefined,
     ifNoneMatch: ctx.request.headers.get('if-none-match') ?? undefined,
   }).catch(() => null);
   if (!result) return notFound();

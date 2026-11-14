@@ -15,22 +15,22 @@ export function SetupNotice() {
 
   const steps: Array<{ title: string; done?: boolean; body: ReactNode }> = [
     {
-      title: 'Add the database',
+      title: 'Connect the database',
       done: status?.database,
       body: (
         <>
-          In the Vercel project open <b>Storage</b> → <b>Create Database</b> → <b>Neon</b> (Postgres) and connect it to this project. Vercel adds{' '}
-          <Code>DATABASE_URL</Code> for you. The tables are created on first use.
+          In this Vercel project open <b>Storage</b>, create or pick a <b>Neon</b> (Postgres) database, and connect it to this project for{' '}
+          <b>Production</b>. Vercel adds <Code>DATABASE_URL</Code> (with your prefix, if you set one). The tables are created on first use.
         </>
       ),
     },
     {
-      title: 'Add file storage',
+      title: 'Connect file storage',
       done: status?.files,
       body: (
         <>
-          <b>Storage</b> → <b>Create</b> → <b>Blob</b>, set access to <b>Private</b>, and connect it. This adds <Code>BLOB_READ_WRITE_TOKEN</Code> for task
-          attachments (one file each, up to 10 MB).
+          <b>Storage</b> → a <b>Blob</b> store with <b>Private</b> access, connected to this project for <b>Production</b>. This adds{' '}
+          <Code>BLOB_READ_WRITE_TOKEN</Code> (or <Code>&lt;PREFIX&gt;_READ_WRITE_TOKEN</Code>) for task attachments (one file each, up to 10 MB).
         </>
       ),
     },
@@ -60,7 +60,9 @@ export function SetupNotice() {
     <section className="rounded-md border border-line bg-surface">
       <header className="border-b border-line px-5 py-4">
         <h2 className="text-[14px] font-semibold tracking-[-0.01em] text-ink">A few steps left</h2>
-        <p className="mt-0.5 text-[12.5px] text-ink-3">The app is deployed. It needs a database on Vercel to talk to.</p>
+        <p className="mt-0.5 text-[12.5px] text-ink-3">
+          The app is deployed. It shows the settings this deployment can see; after connecting storage in Vercel, redeploy.
+        </p>
       </header>
       <ol className="divide-y divide-line">
         {steps.map((s, i) => (
