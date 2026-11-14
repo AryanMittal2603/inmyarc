@@ -14,6 +14,8 @@ import type { TeamLink } from '../lib/types';
 
 const INDIGO = '#3f3cf0';
 const reducedMotion = () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+// A page opened out of view (a background tab) skips the entrance: content never waits on an animation.
+const skipMotion = () => reducedMotion() || document.visibilityState !== 'visible';
 
 type Load = { state: 'loading' } | { state: 'ready'; teams: TeamLink[] } | { state: 'setup' } | { state: 'error'; message: string };
 
@@ -196,7 +198,7 @@ function RatingCard() {
           <li key={v.key} className="flex items-center gap-2.5 rounded-[11px] bg-[#f6f7fb] px-3 py-2">
             <span className="size-2.5 shrink-0 rounded-[3px]" style={{ backgroundColor: v.ink }} />
             <span className="flex-1 text-[13px] font-medium text-[#1d2033]">{v.label}</span>
-            <span className="text-[12px] font-semibold text-[#80849a] tabular-nums">{v.points} pts</span>
+            <span className="text-[12px] font-semibold text-[#80849a] tabular-nums">{v.points} {v.points === 1 ? 'pt' : 'pts'}</span>
           </li>
         ))}
       </ul>
@@ -461,7 +463,7 @@ export function Home() {
 
   // One entrance: the headline settles, then the three cards rise into place.
   useLayoutEffect(() => {
-    if (reducedMotion() || !root.current) return;
+    if (skipMotion() || !root.current) return;
     const ctx = gsap.context(() => {
       const tl = gsap.timeline({ defaults: { ease: 'power3.out' } });
       tl.fromTo('[data-hero-line]', { opacity: 0, y: 22 }, { opacity: 1, y: 0, duration: 0.8, stagger: 0.1 })
@@ -478,7 +480,7 @@ export function Home() {
 
   // Bars grow once the real numbers arrive.
   useLayoutEffect(() => {
-    if (load.state !== 'ready' || reducedMotion() || !root.current) return;
+    if (load.state !== 'ready' || skipMotion() || !root.current) return;
     const ctx = gsap.context(() => {
       gsap.from('[data-bar], [data-team-bar]', { width: 0, duration: 1.1, ease: 'power3.out', stagger: 0.06, delay: 0.5 });
     }, root);
