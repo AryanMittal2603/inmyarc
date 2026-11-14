@@ -378,12 +378,13 @@ export async function verifyPasscode({ request }: Ctx): Promise<Response> {
 
 export async function runImport({ request }: Ctx): Promise<Response> {
   requireAdmin(request);
-  const body = await readJson<{ sourceUrl?: unknown; sourceKey?: unknown }>(request);
+  const body = await readJson<{ sourceUrl?: unknown; sourceKey?: unknown; scope?: unknown }>(request);
   if (typeof body.sourceUrl !== 'string' || typeof body.sourceKey !== 'string' || !body.sourceKey.trim()) {
     throw new HttpError(400, 'Paste the old project URL and its anon key.');
   }
   const d = await db();
-  const result = await importFromSupabase(d, body.sourceUrl, body.sourceKey.trim());
+  const scope = body.scope === 'all' ? 'all' : 'team';
+  const result = await importFromSupabase(d, body.sourceUrl, body.sourceKey.trim(), scope);
   return json(result);
 }
 

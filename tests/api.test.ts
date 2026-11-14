@@ -297,7 +297,7 @@ describe('import from the old Supabase project', () => {
       return new Response(JSON.stringify(offset === 0 ? fixtures[table] ?? [] : []), { headers: { 'Content-Type': 'application/json' } });
     }) as typeof fetch;
 
-    const body = { sourceUrl: 'https://abcdefgh.supabase.co/', sourceKey: 'anon-key' };
+    const body = { sourceUrl: 'https://abcdefgh.supabase.co/', sourceKey: 'anon-key', scope: 'all' };
     assert.equal((await call('POST', 'admin/import', body)).status, 401);
     const r = await call('POST', 'admin/import', body, admin);
     assert.equal(r.status, 200, JSON.stringify(r.data));
@@ -311,6 +311,28 @@ describe('import from the old Supabase project', () => {
     assert.equal(day.data.marks[0].category, 'upto_mark');
     const badUrl = await call('POST', 'admin/import', { sourceUrl: 'https://evil.example.com', sourceKey: 'k' }, admin);
     assert.equal(badUrl.status, 400);
+  });
+
+  test('team only (the default) copies members and leaves history behind', async () => {
+    await pg.exec(`delete from day_marks; delete from entries; delete from day_logs; delete from members`);
+    const Y = '77777777-7777-4777-8777-777777777777';
+    const asked: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const table = new URL(String(input)).pathname.split('/').pop() as string;
+      asked.push(table);
+      const rows: Record<string, unknown[]> = {
+        members: [{ id: Y, name: 'Veni', title: null, active: true, created_at: '2026-10-01T00:00:00Z' }],
+        entries: [{ id: '88888888-8888-4888-8888-888888888888', log_date: '2026-10-28', member_id: Y, title: 'Old work', status: 'done' }],
+      };
+      return new Response(JSON.stringify(rows[table] ?? []), { headers: { 'Content-Type': 'application/json' } });
+    }) as typeof fetch;
+    const r = await call('POST', 'admin/import', { sourceUrl: 'https://abcdefgh.supabase.co', sourceKey: 'anon-key' }, admin);
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    assert.deepEqual([r.data.members, r.data.dayLogs, r.data.entries, r.data.marks], [1, 0, 0, 0]);
+    assert.deepEqual(asked, ['members'], 'only the members table is read');
+    const hist = await call('GET', 'history?from=2026-10-01');
+    assert.equal(hist.data.entries.length, 0);
+    assert.deepEqual(hist.data.members.map((m: { name: string }) => m.name), ['Veni']);
   });
 });
 

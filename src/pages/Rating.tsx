@@ -7,7 +7,7 @@ import { DownloadIcon, PlusIcon, RefreshIcon } from '../components/icons';
 import { LogDayModal, type LogTab } from '../components/LogDayModal';
 import { MemberStatsModal } from '../components/MemberStatsModal';
 import { StatsPanel } from '../components/StatsPanel';
-import { Badge, Button, FieldLabel, Input, cx } from '../components/ui';
+import { Badge, Button, FieldLabel, Input, Segmented, cx } from '../components/ui';
 import { usePasscode } from '../context/passcode';
 import { useToast } from '../context/toast';
 import { useDay } from '../hooks/useDay';
@@ -78,11 +78,12 @@ function AdminGate() {
   );
 }
 
-/** One-off copy of everything from the old Supabase project. Safe to run more than once. */
+/** Copies the team list (and, if wanted, the old history) from the old Supabase project. Safe to run more than once. */
 function ImportPanel({ onDone, onClose }: { onDone: () => void; onClose?: () => void }) {
   const toast = useToast();
   const [sourceUrl, setSourceUrl] = useState('https://rzhvuincdtsiecnodmsr.supabase.co');
   const [sourceKey, setSourceKey] = useState('');
+  const [scope, setScope] = useState<'team' | 'all'>('team');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
@@ -92,9 +93,9 @@ function ImportPanel({ onDone, onClose }: { onDone: () => void; onClose?: () => 
     if (!sourceKey.trim()) return setError('Paste the old project’s anon key.');
     setBusy(true);
     try {
-      const r = await api.importHistory(sourceUrl, sourceKey);
+      const r = await api.importFromOldSite(sourceUrl, sourceKey, scope);
       setResult(r);
-      toast('History imported.');
+      toast(scope === 'team' ? 'Team imported.' : 'Team and history imported.');
       onDone();
     } catch (e) {
       setError(errorText(e, 'The import did not finish.'));
@@ -107,10 +108,10 @@ function ImportPanel({ onDone, onClose }: { onDone: () => void; onClose?: () => 
     <section className="rounded-md border border-line bg-surface">
       <header className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
         <div>
-          <h2 className="text-[14px] font-semibold tracking-[-0.01em] text-ink">Import history</h2>
+          <h2 className="text-[14px] font-semibold tracking-[-0.01em] text-ink">Import the team</h2>
           <p className="mt-0.5 text-[12.5px] text-ink-3">
-            Copies the team, attendance, entries, verdicts and attachments from the old Supabase project. Running it again updates rows instead of
-            duplicating them.
+            Copies the team list from the old Supabase project so everyone can log from day one. The old entries, attendance and verdicts stay
+            behind unless you include them. Running it again updates rows instead of duplicating them.
           </p>
         </div>
         {onClose && (
@@ -119,33 +120,46 @@ function ImportPanel({ onDone, onClose }: { onDone: () => void; onClose?: () => 
           </Button>
         )}
       </header>
-      <div className="grid gap-4 px-5 py-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-        <div>
-          <FieldLabel htmlFor="src-url">Old project URL</FieldLabel>
-          <Input id="src-url" value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} />
+      <div className="flex flex-col gap-4 px-5 py-4">
+        <Segmented
+          value={scope}
+          onChange={setScope}
+          options={[
+            { key: 'team', label: 'Team only' },
+            { key: 'all', label: 'Team + history' },
+          ]}
+        />
+        <div className="grid gap-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+          <div>
+            <FieldLabel htmlFor="src-url">Old project URL</FieldLabel>
+            <Input id="src-url" value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} />
+          </div>
+          <div>
+            <FieldLabel htmlFor="src-key" hint="Supabase → Project Settings → API Keys">
+              Anon key
+            </FieldLabel>
+            <Input id="src-key" type="password" autoComplete="off" value={sourceKey} placeholder="eyJhbGciOi…" onChange={(e) => setSourceKey(e.target.value)} />
+          </div>
+          <Button variant="primary" onClick={run} disabled={busy}>
+            {busy ? 'Importing…' : scope === 'team' ? 'Import team' : 'Import team + history'}
+          </Button>
         </div>
-        <div>
-          <FieldLabel htmlFor="src-key" hint="Supabase → Project Settings → API Keys">
-            Anon key
-          </FieldLabel>
-          <Input id="src-key" type="password" autoComplete="off" value={sourceKey} placeholder="eyJhbGciOi…" onChange={(e) => setSourceKey(e.target.value)} />
-        </div>
-        <Button variant="primary" onClick={run} disabled={busy}>
-          {busy ? 'Importing…' : 'Import'}
-        </Button>
       </div>
       {(error || result) && (
         <div className="border-t border-line px-5 py-3 text-[12.5px]">
           {error && <p className="font-medium text-bad">{error}</p>}
-          {result && (
-            <p className="text-ink-2">
-              Imported {result.members} members, {result.dayLogs} attendance records, {result.entries} entries and {result.marks} verdicts.
-              {result.files.copied + result.files.failed + result.files.skipped > 0 &&
-                ` Attachments: ${result.files.copied} copied${result.files.failed ? `, ${result.files.failed} failed` : ''}${
-                  result.files.skipped ? `, ${result.files.skipped} waiting for Blob storage` : ''
-                }.`}
-            </p>
-          )}
+          {result &&
+            (scope === 'team' ? (
+              <p className="text-ink-2">Imported {result.members} members. No old entries, attendance or verdicts were copied.</p>
+            ) : (
+              <p className="text-ink-2">
+                Imported {result.members} members, {result.dayLogs} attendance records, {result.entries} entries and {result.marks} verdicts.
+                {result.files.copied + result.files.failed + result.files.skipped > 0 &&
+                  ` Attachments: ${result.files.copied} copied${result.files.failed ? `, ${result.files.failed} failed` : ''}${
+                    result.files.skipped ? `, ${result.files.skipped} waiting for Blob storage` : ''
+                  }.`}
+              </p>
+            ))}
         </div>
       )}
     </section>
@@ -362,7 +376,7 @@ function AdminBoard() {
         <div className="flex items-center gap-4">
           {!emptyDatabase && !showImport && (
             <button type="button" onClick={() => setShowImport(true)} className="focus-ring underline-offset-2 hover:text-ink hover:underline">
-              Import history
+              Import from the old site
             </button>
           )}
           <p className="tnum">all times {APP.timezone.replace('_', ' ')}</p>

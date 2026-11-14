@@ -98,8 +98,8 @@ export function Board() {
         <div className="rounded-md border border-line-strong bg-surface px-4 py-3">
           <p className="text-[12.5px] leading-[1.5] text-ink-2">
             No team members yet. Sign in at <code className="rounded-xs bg-mute-bg px-1 py-0.5 font-mono text-[11.5px]">/rating</code> and use{' '}
-            <b>Import history</b>, or add rows to the <code className="rounded-xs bg-mute-bg px-1 py-0.5 font-mono text-[11.5px]">members</code> table, then
-            refresh.
+            <b>Import the team</b>, or add rows to the <code className="rounded-xs bg-mute-bg px-1 py-0.5 font-mono text-[11.5px]">members</code> table,
+            then refresh.
           </p>
         </div>
       )}

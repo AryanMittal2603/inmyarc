@@ -90,7 +90,8 @@ export const api = {
   setMark: (body: { memberId: string; date: string; category: Category | null; overtime: boolean; holiday: boolean; hero: boolean }) =>
     request<{ mark: Mark | null }>('PUT', 'marks', body),
   verify: (passcode: string) => request<{ ok: true }>('POST', 'admin/verify', { passcode }),
-  importHistory: (sourceUrl: string, sourceKey: string) => request<ImportResult>('POST', 'admin/import', { sourceUrl, sourceKey }),
+  importFromOldSite: (sourceUrl: string, sourceKey: string, scope: 'team' | 'all') =>
+    request<ImportResult>('POST', 'admin/import', { sourceUrl, sourceKey, scope }),
 };
 
 export function errorText(error: unknown, fallback: string): string {

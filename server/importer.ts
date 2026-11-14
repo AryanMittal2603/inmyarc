@@ -6,9 +6,9 @@ import { isDate } from './time.js';
 import { ATTENDANCE, CATEGORIES, LIMITS, STATUSES, isUuid } from './validate.js';
 
 /**
- * One-off import of the whole history from the old Supabase project (members, attendance,
- * entries, verdicts — and any attachments) using its public anon key. Safe to run again:
- * every row is upserted by its original id.
+ * One-off import from the old Supabase project using its public anon key.
+ * scope 'team' copies only the members; 'all' also copies attendance, entries, verdicts and
+ * any attachments. Safe to run again: every row is upserted by its original id.
  */
 
 const PAGE = 1000;
@@ -42,7 +42,9 @@ function chunks<T>(rows: T[]): T[][] {
 const str = (v: unknown) => (typeof v === 'string' ? v : null);
 const ts = (v: unknown) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? v : null);
 
-export async function importFromSupabase(d: Db, sourceUrl: string, key: string): Promise<ImportResult> {
+export type ImportScope = 'team' | 'all';
+
+export async function importFromSupabase(d: Db, sourceUrl: string, key: string, scope: ImportScope = 'team'): Promise<ImportResult> {
   const base = sourceUrl.trim().replace(/\/+$/, '');
   if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(base)) {
     throw new HttpError(400, 'Use the old Supabase project URL, like https://abcd1234.supabase.co.');
@@ -65,15 +67,19 @@ export async function importFromSupabase(d: Db, sourceUrl: string, key: string):
     }
   }
 
+  const withHistory = scope === 'all';
+  const none = async (): Promise<Row[]> => [];
   const [members, dayLogs, entries, marks] = await Promise.all([
     fetchAll('members', 'id,name,title,active,created_at', 'name.asc'),
-    fetchAll('day_logs', 'id,member_id,log_date,attendance,note,created_at,updated_at', 'log_date.asc,id.asc'),
-    fetchAll(
-      'entries',
-      'id,log_date,member_id,created_by,title,details,status,minutes,remarks,attachment_path,attachment_name,attachment_type,attachment_size,status_by,status_at,created_at,updated_at',
-      'created_at.asc,id.asc',
-    ),
-    fetchAll('day_marks', 'member_id,log_date,category,overtime,holiday,hero,marked_at', 'log_date.asc,member_id.asc'),
+    withHistory ? fetchAll('day_logs', 'id,member_id,log_date,attendance,note,created_at,updated_at', 'log_date.asc,id.asc') : none(),
+    withHistory
+      ? fetchAll(
+          'entries',
+          'id,log_date,member_id,created_by,title,details,status,minutes,remarks,attachment_path,attachment_name,attachment_type,attachment_size,status_by,status_at,created_at,updated_at',
+          'created_at.asc,id.asc',
+        )
+      : none(),
+    withHistory ? fetchAll('day_marks', 'member_id,log_date,category,overtime,holiday,hero,marked_at', 'log_date.asc,member_id.asc') : none(),
   ]);
 
   const memberIds = new Set(members.map((m) => m.id).filter(isUuid));
@@ -197,10 +203,12 @@ export async function importFromSupabase(d: Db, sourceUrl: string, key: string):
 
   // Attachments: copy anything still pointing at the old storage bucket into the private Blob store.
   const files = { copied: 0, failed: 0, skipped: 0 };
-  const pending = await d.query<{ id: string; attachment_path: string; attachment_type: string | null }>(
-    `select id, attachment_path, attachment_type from entries
-     where attachment_path is not null and attachment_path not like 'task-files/%'`,
-  );
+  const pending = withHistory
+    ? await d.query<{ id: string; attachment_path: string; attachment_type: string | null }>(
+        `select id, attachment_path, attachment_type from entries
+         where attachment_path is not null and attachment_path not like 'task-files/%'`,
+      )
+    : [];
   for (const e of pending) {
     if (!env.blobConfigured()) {
       files.skipped += 1;

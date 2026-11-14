@@ -21,7 +21,9 @@ The repo deploys from `main`. The first deploy shows a "A few steps left" screen
 2. **File storage:** **Storage** → **Create** → **Blob** → access **Private** → connect. Make sure `BLOB_READ_WRITE_TOKEN` is in the project's environment variables (browser uploads need it).
 3. **Admin passcode:** **Settings** → **Environment Variables** → `ADMIN_PASSCODE`.
 4. *(Optional)* **Backfill window:** `EDITABLE_FROM=YYYY-MM-DD` lets the team log and edit days from that date to today. Without it, the team can only log **today**. A row in the `settings` table (`key = 'editable_from'`) overrides it without a redeploy.
-5. **Redeploy**, then open `/rating`, sign in, and use **Import history**. Paste the old Supabase project's **anon** key (Supabase → Project Settings → API Keys). It copies the members, attendance, entries, verdicts and any attachments. Running it again updates rows instead of duplicating them.
+5. **Redeploy**, then open `/rating`, sign in, and use **Import the team**. Paste the old Supabase project's **anon** key (Supabase → Project Settings → API Keys). *Team only* (the default) copies just the member list, so the new board starts with a clean history. *Team + history* also copies attendance, entries, verdicts and attachments. Running it again updates rows instead of duplicating them.
+
+To add or retire someone later, edit the `members` table from Vercel → Storage → your Neon database (or the Neon console): insert a row with a `name`, or set `active = false`.
 
 ## Rules (as in the original)
 
@@ -64,7 +66,7 @@ All routes live in `server/router.ts`. `vercel.json` rewrites `/api/*` to the si
 | PATCH / DELETE | `/api/entries/:id` | team within the window, or admin |
 | PUT | `/api/attendance` | team within the window, or admin |
 | PUT | `/api/marks` | admin |
-| POST | `/api/admin/verify`, `/api/admin/import` | admin |
+| POST | `/api/admin/verify`, `/api/admin/import` (`scope: 'team' \| 'all'`) | admin |
 | POST | `/api/files/upload` | client-upload tokens for Vercel Blob |
 | GET | `/api/files?entry=` | streams a private attachment |
 

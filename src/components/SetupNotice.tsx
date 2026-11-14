@@ -45,11 +45,11 @@ export function SetupNotice() {
       ),
     },
     {
-      title: 'Redeploy, then import the history',
+      title: 'Redeploy, then import the team',
       body: (
         <>
-          Redeploy so the new variables load. Then sign in at <Code>/rating</Code> and use <b>Import history</b> to copy the team, attendance, entries
-          and verdicts from the old project.
+          Redeploy so the new variables load. Then sign in at <Code>/rating</Code> and use <b>Import the team</b> to copy the team list from the old
+          project. Old entries and verdicts are optional.
         </>
       ),
     },
