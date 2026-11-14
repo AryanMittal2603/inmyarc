@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ApiError, api, errorText } from '../lib/api';
+import { ApiError, api, errorText, setSessionToken } from '../lib/api';
 import type { Session } from '../lib/types';
 
 interface SessionState extends Session {
@@ -19,7 +19,10 @@ const EMPTY: SessionState = {
   error: null,
 };
 
-/** Who is signed in (super admin and/or one manager), and the team named by `team`, if any. */
+/**
+ * Who is signed in on this page (super admin or one manager), and the team named by `team`.
+ * The sign-in only lives in memory, so every visit starts signed out.
+ */
 export function useSession(team?: string) {
   const [state, setState] = useState<SessionState>(EMPTY);
 
@@ -39,6 +42,17 @@ export function useSession(team?: string) {
     void refresh();
   }, [refresh]);
 
+  // Coming back with the browser's Back button can restore a page from memory; sign out then too.
+  useEffect(() => {
+    const onShow = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      setSessionToken(null);
+      void refresh();
+    };
+    window.addEventListener('pageshow', onShow);
+    return () => window.removeEventListener('pageshow', onShow);
+  }, [refresh]);
+
   const signInAdmin = useCallback(
     async (password: string) => {
       await api.signInAdmin(password);
@@ -56,16 +70,13 @@ export function useSession(team?: string) {
     [team, refresh],
   );
 
-  const signOut = useCallback(
-    async (scope: 'admin' | 'manager') => {
-      try {
-        await api.signOut(scope);
-      } finally {
-        await refresh();
-      }
-    },
-    [refresh],
-  );
+  const signOut = useCallback(async () => {
+    try {
+      await api.signOut();
+    } finally {
+      await refresh();
+    }
+  }, [refresh]);
 
   return { ...state, refresh, signInAdmin, signInManager, signOut };
 }

@@ -19,7 +19,7 @@ Same fields, limits, validations, verdict logic and colours as the original. The
 | API | Supabase PostgREST + RPCs + row-level security | one Vercel Function (`api/index.ts` → `server/`) that enforces the rules |
 | Database | Supabase Postgres | **Neon Postgres** from the Vercel Marketplace (`DATABASE_URL`) |
 | Attachments | Supabase Storage `task-files` | **Vercel Blob**, private store (`BLOB_READ_WRITE_TOKEN`) |
-| Sign-in | one passcode for `/rating` | super admin password (`ADMIN_PASSCODE`) and one password per manager (stored as scrypt hashes), kept in signed HttpOnly cookies |
+| Sign-in | one passcode for `/rating`, asked on every visit | same idea: the super admin password (`ADMIN_PASSCODE`) or the manager's own (stored as a scrypt hash), asked every time the page is opened; the signed token lives only in the page's memory |
 | "Live" | Supabase Realtime | polling every 10 s while the tab is visible, plus a refresh on focus |
 
 ## Set up on Vercel
@@ -45,14 +45,14 @@ The repo deploys from `main`. Until these are done the pages show an "A few step
   - Status, remarks (500 characters) and attendance can be changed straight from the table. A status change records who changed it and when.
   - Only today is open, unless the super admin opens a backfill window. Other days are **View only**. A past day with nothing logged counts as *Leave*, or *Week off* at weekends, and is marked "by default".
 - **Manager page (`/rating/<team>`)**
-  - Signed in for 7 days. A manager only sees and rates their own team; another team's page asks for that team's password.
+  - The password is asked every time the page is opened (reload, new tab, coming back). A manager only sees and rates their own team; the super admin's password also works here.
   - Full edit access for any past day.
   - The verdict on each person's whole day: Not up to the mark (1 point), Can be better (2), Up to the mark (3), Over performed (4), Extraordinary (5). Clicking the active verdict clears it.
   - Brownies, +1 point each: Overtime, Holiday and Hero. They only unlock once the day is judged.
   - Rows rank by verdict, then brownies. Everyone in the same verdict shares a place, and the order holds still while you judge.
   - **Report** downloads an A4 landscape PDF of the team's day. **Graph** shows standings by verdict or points, per week or month, and each person's record.
 - **Super admin (`/admin`)**
-  - Signed in for 12 hours. Changing `ADMIN_PASSCODE` signs every super admin out.
+  - The password is asked every time the page is opened. Links to boards and manager pages open in a new tab so the dashboard stays signed in. Signing out, or changing `ADMIN_PASSCODE`, ends every super admin sign-in.
   - **Overview:** every team on one board for any day, a per-team summary (logged, judged, brownies), a team filter, combined Graph and Report. The super admin can rate and edit anyone.
   - **Managers:** create, rename, change link names, set new passwords (signs the manager out), turn a team off (hides its links, keeps its history) or delete it (its employees keep their history and move to *No team*).
   - **Employees:** add several at once, move between teams, rename, deactivate. People with logged days can't be deleted, only deactivated.
@@ -70,7 +70,7 @@ npm run typecheck
 
 ## API
 
-All routes live in `server/router.ts`. `vercel.json` rewrites `/api/*` to the single function. Writes must be JSON; sign-in cookies are `HttpOnly`, `SameSite=Lax` and `Secure` on HTTPS.
+All routes live in `server/router.ts`. `vercel.json` rewrites `/api/*` to the single function. Writes must be JSON. Sign-in returns a signed token (12 hours at most) that the page sends as `Authorization: Bearer …` and never stores; nothing uses cookies.
 
 | Method | Route | Who |
 | --- | --- | --- |
@@ -79,7 +79,7 @@ All routes live in `server/router.ts`. `vercel.json` rewrites `/api/*` to the si
 | GET | `/api/history?from=&team=` | same as `/day` |
 | GET | `/api/setup` | anyone: what's configured |
 | GET | `/api/auth/session?team=` | who's signed in |
-| POST | `/api/auth/admin`, `/api/auth/manager`, `/api/auth/logout` | sign in and out |
+| POST | `/api/auth/admin`, `/api/auth/manager` (team password or the super admin's), `/api/auth/logout` (ends that person's sign-ins everywhere) | sign in and out |
 | POST | `/api/day/submit` | the team's board (`team=`) within the window, its manager, or the super admin |
 | POST | `/api/entries` | same (assign = `assigned: true`) |
 | PATCH / DELETE | `/api/entries/:id` | same |

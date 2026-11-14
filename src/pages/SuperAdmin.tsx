@@ -61,7 +61,7 @@ export function SuperAdmin() {
         area="Super admin"
         title="Super admin"
         username="super-admin"
-        description="Create managers, put people on their teams, and see every team in one place."
+        description="Create managers, put people on their teams, and see every team in one place. You’ll enter the password each time you open this page."
         onSubmit={session.signInAdmin}
         footer={
           <a href="/" className="focus-ring rounded-xs underline-offset-2 hover:text-ink hover:underline">
@@ -71,7 +71,7 @@ export function SuperAdmin() {
       />
     );
   }
-  return <Dashboard onSignOut={() => void session.signOut('admin')} onSignedOut={() => void session.refresh()} />;
+  return <Dashboard onSignOut={() => void session.signOut()} onSignedOut={() => void session.refresh()} />;
 }
 
 function Dashboard({ onSignOut, onSignedOut }: { onSignOut: () => void; onSignedOut: () => void }) {

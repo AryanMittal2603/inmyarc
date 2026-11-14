@@ -333,6 +333,8 @@ export function ManagersTab({ data, reload, onSignedOut }: Props) {
                           <div key={l.label} className="flex min-w-0 items-center gap-1">
                             <a
                               href={l.path}
+                              target="_blank"
+                              rel="noopener noreferrer"
                               className={cx(
                                 'focus-ring truncate rounded-xs text-[12.5px] underline-offset-2 hover:underline',
                                 m.active ? 'text-ink-2 hover:text-ink' : 'pointer-events-none text-ink-4',

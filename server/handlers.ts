@@ -2,12 +2,12 @@ import { createHash } from 'node:crypto';
 import { get } from '@vercel/blob';
 import { handleUpload, type HandleUploadBody } from '@vercel/blob/client';
 import {
-  adminCookie,
+  adminToken,
   checkPasscode,
-  clearCookie,
   hashPassword,
-  managerCookie,
+  managerToken,
   passcodeConfigured,
+  revoke,
   sessionsOf,
   verifyPassword,
   type Sessions,
@@ -299,9 +299,10 @@ export async function loginAdmin(ctx: Ctx): Promise<Response> {
     throw new HttpError(401, 'Incorrect password.', 'bad_password');
   }
   const d = await db();
-  return json({ ok: true }, 200, { 'Set-Cookie': await adminCookie(ctx.request, d) });
+  return json({ ok: true, role: 'admin', ...(await adminToken(d)) });
 }
 
+/** A team's manager page. The super admin's password works here too (full access to every team). */
 export async function loginManager(ctx: Ctx): Promise<Response> {
   const body = await readJson<{ team?: unknown; password?: unknown }>(ctx.request);
   const d = await db();
@@ -312,16 +313,21 @@ export async function loginManager(ctx: Ctx): Promise<Response> {
       )
     : [];
   if (!m || !m.active) throw new HttpError(404, NO_TEAM, 'no_team');
-  if (typeof body.password !== 'string' || !(await verifyPassword(body.password, m.password_hash))) {
-    await delay(450);
-    throw new HttpError(401, 'Incorrect password.', 'bad_password');
+  const password = typeof body.password === 'string' ? body.password : '';
+  if (password && (await verifyPassword(password, m.password_hash))) {
+    return json({ ok: true, role: 'manager', manager: { name: m.name, slug: m.slug }, ...(await managerToken(d, m)) });
   }
-  return json({ ok: true, manager: { name: m.name, slug: m.slug } }, 200, { 'Set-Cookie': await managerCookie(ctx.request, d, m) });
+  if (password && checkPasscode(password)) {
+    return json({ ok: true, role: 'admin', ...(await adminToken(d)) });
+  }
+  await delay(450);
+  throw new HttpError(401, 'Incorrect password.', 'bad_password');
 }
 
+/** Ends this person's sign-in everywhere (every tab and device). */
 export async function logout(ctx: Ctx): Promise<Response> {
-  const body = await readJson<{ scope?: unknown }>(ctx.request);
-  return json({ ok: true }, 200, { 'Set-Cookie': clearCookie(ctx.request, body.scope === 'admin' ? 'admin' : 'manager') });
+  if (hasDatabase()) await revoke(ctx.request, await db());
+  return json({ ok: true });
 }
 
 /* ───────────────────────── team writes ───────────────────────── */

@@ -3,17 +3,17 @@ import type { Db } from './db.js';
 import { env } from './env.js';
 
 /*
- * Two kinds of sign-in, each in its own HttpOnly cookie:
- *   iv_admin   — the super admin (password = ADMIN_PASSCODE), 12 hours
- *   iv_manager — one manager (password set by the super admin, stored hashed), 7 days
- * Cookies are signed with HMAC-SHA256. Changing ADMIN_PASSCODE signs every super admin out;
- * resetting or deactivating a manager signs that manager out (session_version).
+ * Two kinds of sign-in, both asked for every time the page is opened:
+ *   super admin — password = ADMIN_PASSCODE
+ *   manager     — password set by the super admin, stored as a scrypt hash
+ * A successful sign-in returns a signed token (HMAC-SHA256, 12 hours) that the page keeps in
+ * memory only and sends as "Authorization: Bearer …". Nothing is stored in the browser, so a
+ * reload, a new tab or coming back later means entering the password again.
+ * Signing out, a password reset or turning a team off ends the manager's tokens
+ * (session_version); signing out or changing ADMIN_PASSCODE ends the super admin's.
  */
 
-const ADMIN_COOKIE = 'iv_admin';
-const MANAGER_COOKIE = 'iv_manager';
-const ADMIN_TTL = 12 * 60 * 60;
-const MANAGER_TTL = 7 * 24 * 60 * 60;
+const TTL = 12 * 60 * 60;
 
 export interface ManagerSession {
   managerId: string;
@@ -24,6 +24,12 @@ export interface ManagerSession {
 export interface Sessions {
   admin: boolean;
   manager: ManagerSession | null;
+}
+
+export interface IssuedToken {
+  token: string;
+  /** Unix time in ms. */
+  expiresAt: number;
 }
 
 /* ───────── passwords (scrypt) ───────── */
@@ -62,7 +68,7 @@ export function checkPasscode(candidate: string | null | undefined): boolean {
   return timingSafeEqual(a, b);
 }
 
-/* ───────── signed cookies ───────── */
+/* ───────── signed tokens ───────── */
 
 let cachedSecret: string | null = null;
 
@@ -102,61 +108,81 @@ function unsign<T>(key: string, token: string): T | null {
   }
 }
 
-function readCookies(request: Request): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const part of (request.headers.get('cookie') ?? '').split(';')) {
-    const i = part.indexOf('=');
-    if (i > 0) out[part.slice(0, i).trim()] = part.slice(i + 1).trim();
-  }
-  return out;
-}
-
-function cookie(request: Request, name: string, value: string, maxAge: number): string {
-  const secure = new URL(request.url).protocol === 'https:' ? '; Secure' : '';
-  return `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`;
-}
-
 const now = () => Math.floor(Date.now() / 1000);
 
 function adminFingerprint(key: string): string {
   return createHmac('sha256', key).update(`admin:${env.adminPasscode()}`).digest('base64url').slice(0, 22);
 }
 
-export async function adminCookie(request: Request, d: Db): Promise<string> {
+async function adminVersion(d: Db): Promise<number> {
+  const [row] = await d.query<{ value: string | null }>(`select value from settings where key = 'admin_session_version'`);
+  return Number(row?.value) || 1;
+}
+
+export async function adminToken(d: Db): Promise<IssuedToken> {
   const key = await secret(d);
-  return cookie(request, ADMIN_COOKIE, sign(key, { r: 'a', f: adminFingerprint(key), e: now() + ADMIN_TTL }), ADMIN_TTL);
+  const e = now() + TTL;
+  return { token: sign(key, { r: 'a', f: adminFingerprint(key), v: await adminVersion(d), e }), expiresAt: e * 1000 };
 }
 
-export async function managerCookie(request: Request, d: Db, manager: { id: string; session_version: number }): Promise<string> {
+export async function managerToken(d: Db, manager: { id: string; session_version: number }): Promise<IssuedToken> {
   const key = await secret(d);
-  const token = sign(key, { r: 'm', m: manager.id, v: manager.session_version, e: now() + MANAGER_TTL });
-  return cookie(request, MANAGER_COOKIE, token, MANAGER_TTL);
+  const e = now() + TTL;
+  return { token: sign(key, { r: 'm', m: manager.id, v: manager.session_version, e }), expiresAt: e * 1000 };
 }
 
-export function clearCookie(request: Request, which: 'admin' | 'manager'): string {
-  return cookie(request, which === 'admin' ? ADMIN_COOKIE : MANAGER_COOKIE, '', 0);
+interface TokenPayload {
+  r: string;
+  e: number;
+  f?: string;
+  v?: number;
+  m?: string;
 }
 
-/** Who is signed in on this request (both can be true in one browser). */
+function bearer(request: Request): string | null {
+  const match = /^Bearer\s+(\S+)$/i.exec(request.headers.get('authorization') ?? '');
+  return match ? match[1] : null;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function readToken(request: Request, d: Db): Promise<TokenPayload | null> {
+  const token = bearer(request);
+  if (!token) return null;
+  const p = unsign<TokenPayload>(await secret(d), token);
+  return p && typeof p.e === 'number' && p.e > now() ? p : null;
+}
+
+/** Who this request is signed in as (from its bearer token). */
 export async function sessionsOf(request: Request, d: Db): Promise<Sessions> {
-  const jar = readCookies(request);
   const result: Sessions = { admin: false, manager: null };
-  if (!jar[ADMIN_COOKIE] && !jar[MANAGER_COOKIE]) return result;
-  const key = await secret(d);
-
-  if (jar[ADMIN_COOKIE] && passcodeConfigured()) {
-    const p = unsign<{ r: string; f: string; e: number }>(key, jar[ADMIN_COOKIE]);
-    result.admin = !!p && p.r === 'a' && p.e > now() && p.f === adminFingerprint(key);
-  }
-  if (jar[MANAGER_COOKIE]) {
-    const p = unsign<{ r: string; m: string; v: number; e: number }>(key, jar[MANAGER_COOKIE]);
-    if (p && p.r === 'm' && p.e > now() && typeof p.m === 'string') {
-      const [m] = await d.query<{ id: string; slug: string; name: string; session_version: number }>(
-        `select id, slug, name, session_version from managers where id = $1 and active`,
-        [p.m],
-      );
-      if (m && m.session_version === p.v) result.manager = { managerId: m.id, slug: m.slug, name: m.name };
-    }
+  const p = await readToken(request, d);
+  if (!p) return result;
+  if (p.r === 'a') {
+    const key = await secret(d);
+    result.admin = passcodeConfigured() && p.f === adminFingerprint(key) && p.v === (await adminVersion(d));
+  } else if (p.r === 'm' && typeof p.m === 'string' && UUID.test(p.m)) {
+    const [m] = await d.query<{ id: string; slug: string; name: string; session_version: number }>(
+      `select id, slug, name, session_version from managers where id = $1 and active`,
+      [p.m],
+    );
+    if (m && m.session_version === p.v) result.manager = { managerId: m.id, slug: m.slug, name: m.name };
   }
   return result;
+}
+
+/** Signing out ends every token of that super admin or manager, not just this tab's. */
+export async function revoke(request: Request, d: Db): Promise<void> {
+  const p = await readToken(request, d);
+  if (!p) return;
+  if (p.r === 'a') {
+    const sessions = await sessionsOf(request, d);
+    if (!sessions.admin) return;
+    await d.query(
+      `insert into settings (key, value) values ('admin_session_version', '2')
+       on conflict (key) do update set value = ((coalesce(settings.value, '1'))::int + 1)::text, updated_at = now()`,
+    );
+  } else if (p.r === 'm' && typeof p.m === 'string' && UUID.test(p.m)) {
+    await d.query(`update managers set session_version = session_version + 1 where id = $1 and session_version = $2`, [p.m, p.v ?? -1]);
+  }
 }

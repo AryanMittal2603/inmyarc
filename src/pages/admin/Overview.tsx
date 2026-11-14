@@ -213,6 +213,8 @@ export function OverviewTab({ onSignedOut }: { onSignedOut: () => void }) {
                       {s.team?.active && (
                         <a
                           href={links.rating(s.team.slug)}
+                          target="_blank"
+                          rel="noopener noreferrer"
                           onClick={(e) => e.stopPropagation()}
                           className="focus-ring rounded-xs text-[12px] text-ink-3 underline-offset-2 hover:text-ink hover:underline"
                         >

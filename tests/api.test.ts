@@ -11,13 +11,12 @@ let pg: PGlite;
 interface Res {
   status: number;
   data: any;
-  cookie: string | null;
   setCookie: string | null;
 }
 
-async function call(method: string, path: string, body?: unknown, cookie?: string | null, type = 'application/json'): Promise<Res> {
+async function call(method: string, path: string, body?: unknown, token?: string | null, type = 'application/json'): Promise<Res> {
   const headers: Record<string, string> = { 'Content-Type': type };
-  if (cookie) headers.Cookie = cookie;
+  if (token) headers.Authorization = `Bearer ${token}`;
   const res = await handle(
     new Request(`http://local/api/${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) }),
   );
@@ -27,7 +26,6 @@ async function call(method: string, path: string, body?: unknown, cookie?: strin
     status: res.status,
     data: isJson ? await res.json() : await res.text(),
     setCookie,
-    cookie: setCookie ? setCookie.split(';')[0] : null,
   };
 }
 
@@ -36,8 +34,8 @@ const ok = (r: Res, status = 200) => assert.equal(r.status, status, JSON.stringi
 let admin = '';
 let alphaId = '';
 let betaId = '';
-let alphaCookie = '';
-let betaCookie = '';
+let alphaToken = '';
+let betaToken = '';
 // members
 let ana = ''; // alpha
 let ben = ''; // alpha
@@ -47,7 +45,8 @@ let drew = ''; // unassigned
 async function signInManager(team: string, password: string): Promise<string> {
   const r = await call('POST', 'auth/manager', { team, password });
   ok(r);
-  return r.cookie as string;
+  assert.equal(r.data.role, 'manager');
+  return r.data.token as string;
 }
 
 before(async () => {
@@ -75,28 +74,33 @@ describe('setup', () => {
 });
 
 describe('super admin sign-in', () => {
-  test('wrong password, right password, cookie flags', async () => {
+  test('wrong password, right password; a token, never a cookie', async () => {
     const wrong = await call('POST', 'auth/admin', { password: 'nope' });
     assert.equal(wrong.status, 401);
     assert.equal(wrong.data.error, 'Incorrect password.');
-    assert.equal(wrong.setCookie, null);
+    assert.equal(wrong.data.token, undefined);
 
     const r = await call('POST', 'auth/admin', { password: PASS });
     ok(r);
-    assert.match(r.setCookie ?? '', /^iv_admin=[^;]+; Path=\/; HttpOnly; SameSite=Lax; Max-Age=43200$/);
-    admin = r.cookie as string;
+    assert.equal(r.setCookie, null, 'nothing is remembered by the browser');
+    assert.equal(r.data.role, 'admin');
+    assert.match(r.data.token, /^[\w-]+\.[\w-]+$/);
+    const hours = (r.data.expiresAt - Date.now()) / 3_600_000;
+    assert.ok(hours > 11.9 && hours <= 12, `token lasts 12 hours (${hours})`);
+    admin = r.data.token as string;
     const s = await call('GET', 'auth/session', undefined, admin);
     assert.equal(s.data.admin, true);
     assert.equal(s.data.manager, null);
     assert.equal((await call('GET', 'auth/session')).data.admin, false);
   });
 
-  test('tampered cookies are ignored; changing ADMIN_PASSCODE signs everyone out', async () => {
-    const [name, value] = admin.split('=');
-    const [body, mac] = value.split('.');
-    const forged = `${name}=${Buffer.from(JSON.stringify({ r: 'a', f: 'x', e: 9e12 })).toString('base64url')}.${mac}`;
+  test('tampered tokens are ignored; changing ADMIN_PASSCODE signs everyone out', async () => {
+    const [body, mac] = admin.split('.');
+    const forged = `${Buffer.from(JSON.stringify({ r: 'a', f: 'x', v: 1, e: 9e12 })).toString('base64url')}.${mac}`;
     assert.equal((await call('GET', 'admin/overview', undefined, forged)).status, 401);
-    assert.equal((await call('GET', 'admin/overview', undefined, `${name}=${body}.AAAA`)).status, 401);
+    assert.equal((await call('GET', 'admin/overview', undefined, `${body}.AAAA`)).status, 401);
+    const asCookie = await handle(new Request('http://local/api/admin/overview', { headers: { Cookie: `iv_admin=${admin}` } }));
+    assert.equal(asCookie.status, 401, 'cookies are not read at all');
 
     process.env.ADMIN_PASSCODE = 'Changed@12345';
     assert.equal((await call('GET', 'admin/overview', undefined, admin)).status, 401);
@@ -111,9 +115,14 @@ describe('super admin sign-in', () => {
     process.env.ADMIN_PASSCODE = PASS;
   });
 
-  test('logout clears the cookie', async () => {
-    const r = await call('POST', 'auth/logout', { scope: 'admin' });
-    assert.match(r.setCookie ?? '', /^iv_admin=; Path=\/; HttpOnly; SameSite=Lax; Max-Age=0$/);
+  test('signing out ends that sign-in everywhere', async () => {
+    const other = (await call('POST', 'auth/admin', { password: PASS })).data.token as string;
+    ok(await call('POST', 'auth/logout', {}, other));
+    assert.equal((await call('GET', 'admin/overview', undefined, other)).status, 401);
+    assert.equal((await call('GET', 'admin/overview', undefined, admin)).status, 401, 'other tabs too');
+    admin = (await call('POST', 'auth/admin', { password: PASS })).data.token as string;
+    ok(await call('GET', 'admin/overview', undefined, admin));
+    ok(await call('POST', 'auth/logout', {}), 200);
   });
 });
 
@@ -201,18 +210,36 @@ describe('manager sign-in', () => {
     assert.equal(wrong.data.error, 'Incorrect password.');
     const r = await call('POST', 'auth/manager', { team: 'alpha', password: 'alpha-pass-1' });
     ok(r);
-    assert.match(r.setCookie ?? '', /^iv_manager=[^;]+; Path=\/; HttpOnly; SameSite=Lax; Max-Age=604800$/);
-    alphaCookie = r.cookie as string;
-    betaCookie = await signInManager('beta', 'beta-pass-1');
-    const s = await call('GET', 'auth/session?team=alpha', undefined, alphaCookie);
+    assert.equal(r.setCookie, null);
+    assert.equal(r.data.role, 'manager');
+    alphaToken = r.data.token as string;
+    betaToken = await signInManager('beta', 'beta-pass-1');
+    const s = await call('GET', 'auth/session?team=alpha', undefined, alphaToken);
     assert.deepEqual(s.data.manager, { name: 'Asha Rao', slug: 'alpha' });
     assert.deepEqual(s.data.team, { name: 'Asha Rao', slug: 'alpha' });
     assert.equal(s.data.admin, false);
   });
 
+  test('the super admin’s password also opens any manager page', async () => {
+    const r = await call('POST', 'auth/manager', { team: 'beta', password: PASS });
+    ok(r);
+    assert.equal(r.data.role, 'admin');
+    ok(await call('GET', 'admin/overview', undefined, r.data.token));
+  });
+
+  test('a manager signing out ends their sign-in in every tab', async () => {
+    const one = await signInManager('alpha', 'alpha-pass-1');
+    const two = await signInManager('alpha', 'alpha-pass-1');
+    ok(await call('POST', 'auth/logout', {}, one));
+    assert.equal((await call('GET', 'auth/session', undefined, two)).data.manager, null);
+    assert.equal((await call('GET', 'auth/session', undefined, alphaToken)).data.manager, null);
+    alphaToken = await signInManager('alpha', 'alpha-pass-1');
+    assert.equal((await call('GET', 'auth/session', undefined, alphaToken)).data.manager.slug, 'alpha');
+  });
+
   test('managers cannot use the super admin pages', async () => {
-    assert.equal((await call('GET', 'admin/overview', undefined, alphaCookie)).status, 401);
-    assert.equal((await call('GET', `day?date=${today()}&team=*`, undefined, alphaCookie)).status, 401);
+    assert.equal((await call('GET', 'admin/overview', undefined, alphaToken)).status, 401);
+    assert.equal((await call('GET', `day?date=${today()}&team=*`, undefined, alphaToken)).status, 401);
   });
 
   test('a password reset signs the manager out', async () => {
@@ -220,19 +247,19 @@ describe('manager sign-in', () => {
     ok(await call('PATCH', `admin/managers/${betaId}`, { password: 'beta-pass-2' }, admin));
     assert.equal((await call('GET', 'auth/session', undefined, before)).data.manager, null);
     assert.equal((await call('POST', 'auth/manager', { team: 'beta', password: 'beta-pass-1' })).status, 401);
-    betaCookie = await signInManager('beta', 'beta-pass-2');
+    betaToken = await signInManager('beta', 'beta-pass-2');
   });
 
   test('a deactivated team disappears until it is switched back on', async () => {
     const r = await call('PATCH', `admin/managers/${betaId}`, { active: false }, admin);
     ok(r);
     assert.equal(r.data.manager.active, false);
-    assert.equal((await call('GET', 'auth/session', undefined, betaCookie)).data.manager, null);
+    assert.equal((await call('GET', 'auth/session', undefined, betaToken)).data.manager, null);
     assert.equal((await call('POST', 'auth/manager', { team: 'beta', password: 'beta-pass-2' })).status, 404);
     assert.equal((await call('GET', `day?date=${today()}&team=beta`)).status, 404);
     assert.deepEqual((await call('GET', 'teams')).data.teams.map((t: { slug: string }) => t.slug), ['alpha']);
     ok(await call('PATCH', `admin/managers/${betaId}`, { active: true }, admin));
-    betaCookie = await signInManager('beta', 'beta-pass-2');
+    betaToken = await signInManager('beta', 'beta-pass-2');
   });
 
   test('link names can be changed, but not to one in use', async () => {
@@ -243,7 +270,7 @@ describe('manager sign-in', () => {
     assert.equal((await call('GET', `day?date=${today()}&team=beta`)).status, 404);
     ok(await call('GET', `day?date=${today()}&team=beta-team`));
     ok(await call('PATCH', `admin/managers/${betaId}`, { slug: 'beta' }, admin));
-    assert.equal((await call('GET', 'auth/session', undefined, betaCookie)).data.manager.slug, 'beta', 'renames keep you signed in');
+    assert.equal((await call('GET', 'auth/session', undefined, betaToken)).data.manager.slug, 'beta', 'renames keep you signed in');
   });
 });
 
@@ -335,11 +362,11 @@ describe('logging a day', () => {
     const locked = await call('POST', 'day/submit', body);
     assert.equal(locked.status, 403);
     assert.equal(locked.data.error, 'This day is locked. Your manager can change it from their page.');
-    assert.equal((await call('POST', 'day/submit', body, betaCookie)).status, 403, 'another team’s manager is just a visitor here');
-    ok(await call('POST', 'day/submit', body, alphaCookie));
-    ok(await call('POST', 'day/submit', { ...body, team: undefined, memberId: ben }, alphaCookie));
+    assert.equal((await call('POST', 'day/submit', body, betaToken)).status, 403, 'another team’s manager is just a visitor here');
+    ok(await call('POST', 'day/submit', body, alphaToken));
+    ok(await call('POST', 'day/submit', { ...body, team: undefined, memberId: ben }, alphaToken));
     ok(await call('POST', 'day/submit', { ...body, team: undefined, memberId: cara }, admin));
-    assert.equal((await call('POST', 'day/submit', { ...body, team: undefined, memberId: cara }, alphaCookie)).status, 403);
+    assert.equal((await call('POST', 'day/submit', { ...body, team: undefined, memberId: cara }, alphaToken)).status, 403);
   });
 
   test('the backfill window: EDITABLE_FROM, overridden by the dashboard setting', async () => {
@@ -349,7 +376,7 @@ describe('logging a day', () => {
     ok(await call('POST', 'day/submit', body));
     assert.equal((await call('GET', `day?date=${y}&team=alpha`)).data.openFrom, addDays(today(), -5));
 
-    assert.equal((await call('PUT', 'admin/settings', { editableFrom: today() }, alphaCookie)).status, 401);
+    assert.equal((await call('PUT', 'admin/settings', { editableFrom: today() }, alphaToken)).status, 401);
     const set = await call('PUT', 'admin/settings', { editableFrom: today() }, admin);
     ok(set);
     assert.deepEqual(set.data, { editableFrom: today(), openFrom: today() });
@@ -433,15 +460,15 @@ describe('editing entries', () => {
   test('other teams cannot touch it', async () => {
     assert.equal((await call('PATCH', `entries/${id}?team=beta`, { remarks: 'x' })).status, 403);
     assert.equal((await call('DELETE', `entries/${id}?team=beta`)).status, 403);
-    assert.equal((await call('DELETE', `entries/${id}`, undefined, betaCookie)).status, 403);
+    assert.equal((await call('DELETE', `entries/${id}`, undefined, betaToken)).status, 403);
   });
 
   test('past entries are locked for the board but not for the manager', async () => {
     await pg.query(`update entries set log_date = $2 where id = $1`, [id, addDays(today(), -3)]);
     assert.equal((await call('PATCH', `entries/${id}?team=alpha`, { remarks: 'hi' })).status, 403);
     assert.equal((await call('DELETE', `entries/${id}?team=alpha`)).status, 403);
-    ok(await call('PATCH', `entries/${id}`, { remarks: 'hi' }, alphaCookie));
-    ok(await call('DELETE', `entries/${id}`, undefined, alphaCookie));
+    ok(await call('PATCH', `entries/${id}`, { remarks: 'hi' }, alphaToken));
+    ok(await call('DELETE', `entries/${id}`, undefined, alphaToken));
     assert.equal((await call('PATCH', `entries/${id}`, { remarks: 'again' }, admin)).status, 404);
   });
 
@@ -470,11 +497,11 @@ describe('attendance and verdicts', () => {
   test('only the team’s manager or the super admin gives verdicts', async () => {
     const body = { memberId: ana, date: today(), category: 'over_performed', overtime: true, holiday: false, hero: true };
     assert.equal((await call('PUT', 'marks', { ...body, team: 'alpha' })).status, 401);
-    const other = await call('PUT', 'marks', body, betaCookie);
+    const other = await call('PUT', 'marks', body, betaToken);
     assert.equal(other.status, 403);
     assert.equal(other.data.error, 'Only this person’s manager can give verdicts.');
 
-    const r = await call('PUT', 'marks', body, alphaCookie);
+    const r = await call('PUT', 'marks', body, alphaToken);
     ok(r);
     assert.equal(r.data.mark.category, 'over_performed');
     assert.equal(r.data.mark.overtime, true);
@@ -482,14 +509,14 @@ describe('attendance and verdicts', () => {
     const by = await pg.query<{ marked_by: string }>(`select marked_by from day_marks where member_id = $1`, [ana]);
     assert.equal(by.rows[0].marked_by, 'manager:alpha');
 
-    ok(await call('PUT', 'marks', { ...body, date: addDays(today(), -20) }, alphaCookie), 200);
+    ok(await call('PUT', 'marks', { ...body, date: addDays(today(), -20) }, alphaToken), 200);
     ok(await call('PUT', 'marks', { ...body, memberId: cara }, admin));
     const byAdmin = await pg.query<{ marked_by: string }>(`select marked_by from day_marks where member_id = $1`, [cara]);
     assert.equal(byAdmin.rows[0].marked_by, 'admin');
-    assert.equal((await call('PUT', 'marks', { ...body, category: 'great' }, alphaCookie)).status, 400);
+    assert.equal((await call('PUT', 'marks', { ...body, category: 'great' }, alphaToken)).status, 400);
     assert.equal((await call('PUT', 'marks', { ...body, date: addDays(today(), 1) }, admin)).status, 400);
 
-    const cleared = await call('PUT', 'marks', { memberId: ana, date: today(), category: null }, alphaCookie);
+    const cleared = await call('PUT', 'marks', { memberId: ana, date: today(), category: null }, alphaToken);
     assert.equal(cleared.data.mark, null);
     const hist = await call('GET', `history?from=${addDays(today(), -30)}&team=alpha`);
     assert.equal(hist.data.marks.length, 1);
@@ -563,7 +590,7 @@ describe('import from the old Supabase project', () => {
 
     const body = { sourceUrl: 'https://abcdefgh.supabase.co/', sourceKey: 'anon-key', scope: 'all', managerId: alphaId };
     assert.equal((await call('POST', 'admin/import', body)).status, 401);
-    assert.equal((await call('POST', 'admin/import', body, alphaCookie)).status, 401);
+    assert.equal((await call('POST', 'admin/import', body, alphaToken)).status, 401);
     const r = await call('POST', 'admin/import', body, admin);
     ok(r);
     assert.deepEqual([r.data.members, r.data.dayLogs, r.data.entries, r.data.marks], [1, 1, 1, 1]);

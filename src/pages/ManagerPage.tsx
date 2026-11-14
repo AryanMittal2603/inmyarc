@@ -66,15 +66,8 @@ export function ManagerPage({ slug }: { slug: string }) {
         area="Ratings"
         title={session.team.name}
         username={slug}
-        description="Sign in to rate your team’s days and edit any day’s tasks. Your password comes from the super admin."
+        description="Enter your password to rate your team’s days and edit any day. It’s asked each time you open this page. The super admin can use theirs."
         onSubmit={session.signInManager}
-        note={
-          session.manager ? (
-            <p className="-mt-2 mb-4 rounded-sm bg-mute-bg px-2.5 py-2 text-[12px] leading-[1.45] text-ink-2">
-              You’re signed in to <b>{session.manager.name}</b>’s team. Signing in here switches you to this team.
-            </p>
-          ) : null
-        }
         footer={
           <a href={links.board(slug)} className="focus-ring rounded-xs underline-offset-2 hover:text-ink hover:underline">
             Back to the team board
@@ -89,7 +82,7 @@ export function ManagerPage({ slug }: { slug: string }) {
       slug={slug}
       teamName={session.team.name}
       ownTeam={ownTeam}
-      onSignOut={() => void session.signOut('manager')}
+      onSignOut={() => void session.signOut()}
       onSignedOut={() => void session.refresh()}
     />
   );
@@ -229,20 +222,14 @@ function ManagerBoard({
             <DownloadIcon className="size-3.5" />
             {building ? 'Building…' : 'Report'}
           </Button>
-          {ownTeam ? (
-            <Button className="shrink-0" onClick={onSignOut}>
-              Sign out
-            </Button>
-          ) : (
-            <Button className="shrink-0" onClick={() => (window.location.href = '/admin')}>
-              Super admin
-            </Button>
-          )}
+          <Button className="shrink-0" onClick={onSignOut}>
+            Sign out
+          </Button>
           <Button variant="primary" className="shrink-0" onClick={() => setDialog({ open: true, tab: 'day', member: null })} disabled={day.roster.length === 0}>
             <PlusIcon className="size-3.5" />
             Add task
           </Button>
-          <Button className="shrink-0" onClick={() => (window.location.href = links.board(slug))}>
+          <Button className="shrink-0" onClick={() => window.open(links.board(slug), '_blank', 'noopener')} title="Opens the team board in a new tab">
             Board
           </Button>
         </div>

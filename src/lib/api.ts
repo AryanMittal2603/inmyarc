@@ -18,9 +18,26 @@ import type {
 } from './types';
 
 /**
- * Sign-ins live in HttpOnly cookies set by the API (super admin: 12 hours, managers: 7 days),
- * so nothing secret is kept in the page.
+ * The sign-in token lives in this page's memory only — never in a cookie or storage — so every
+ * reload, new tab or later visit to a manager page or /admin asks for the password again.
  */
+let sessionToken: string | null = null;
+
+export function setSessionToken(token: string | null): void {
+  sessionToken = token;
+}
+
+export function hasSessionToken(): boolean {
+  return sessionToken !== null;
+}
+
+interface SignedIn {
+  ok: true;
+  role: 'admin' | 'manager';
+  token: string;
+  expiresAt: number;
+  manager?: { name: string; slug: string };
+}
 
 export class ApiError extends Error {
   readonly status: number;
@@ -36,6 +53,7 @@ export class ApiError extends Error {
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (method !== 'GET') headers['Content-Type'] = 'application/json';
+  if (sessionToken) headers.Authorization = `Bearer ${sessionToken}`;
   let response: Response;
   try {
     response = await fetch(`/api/${path}`, {
@@ -43,7 +61,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       headers,
       body: method === 'GET' ? undefined : JSON.stringify(body ?? {}),
       cache: 'no-store',
-      credentials: 'same-origin',
+      credentials: 'omit',
     });
   } catch {
     throw new ApiError('Could not reach the server. Check your connection and try again.', 0);
@@ -103,10 +121,25 @@ export const api = {
 
   // sign-in
   session: (team?: string) => request<Session>('GET', `auth/session${team ? `?team=${encodeURIComponent(team)}` : ''}`),
-  signInAdmin: (password: string) => request<{ ok: true }>('POST', 'auth/admin', { password }),
-  signInManager: (team: string, password: string) =>
-    request<{ ok: true; manager: { name: string; slug: string } }>('POST', 'auth/manager', { team, password }),
-  signOut: (scope: 'admin' | 'manager') => request<{ ok: true }>('POST', 'auth/logout', { scope }),
+  signInAdmin: async (password: string) => {
+    const res = await request<SignedIn>('POST', 'auth/admin', { password });
+    setSessionToken(res.token);
+    return res;
+  },
+  /** A team's manager password, or the super admin's. */
+  signInManager: async (team: string, password: string) => {
+    const res = await request<SignedIn>('POST', 'auth/manager', { team, password });
+    setSessionToken(res.token);
+    return res;
+  },
+  /** Ends the sign-in on the server (every tab) and forgets it here. */
+  signOut: async () => {
+    try {
+      if (sessionToken) await request<{ ok: true }>('POST', 'auth/logout', {});
+    } finally {
+      setSessionToken(null);
+    }
+  },
 
   // the day's work
   submitDay: (team: TeamScope, body: SubmitDayBody) => request<{ count: number }>('POST', `day/submit${teamQuery(team)}`, body),
