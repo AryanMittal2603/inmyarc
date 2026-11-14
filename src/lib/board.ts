@@ -53,7 +53,7 @@ export function buildGroups(members: Member[], dayLogs: DayLog[], entries: Entry
   });
 }
 
-/* The admin page keeps rows where they were when the day loaded, so judging never reshuffles. */
+/* Rating pages keep rows where they were when the day loaded, so judging never reshuffles. */
 
 export interface HeldOrder {
   date: string;

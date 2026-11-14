@@ -2,12 +2,24 @@
  * Database schema. Runs automatically (idempotently) the first time the API talks to a
  * database whose schema_version differs from SCHEMA_VERSION.
  */
-export const SCHEMA_VERSION = '1';
+export const SCHEMA_VERSION = '2';
 
 export const SCHEMA: string[] = [
   `create table if not exists settings (
     key text primary key,
     value text,
+    updated_at timestamptz not null default now()
+  )`,
+
+  /* Managers own a team. They sign in at /rating/<slug>; their team logs at /task/<slug>. */
+  `create table if not exists managers (
+    id uuid primary key default gen_random_uuid(),
+    name text not null,
+    slug text not null unique,
+    password_hash text not null,
+    session_version integer not null default 1,
+    active boolean not null default true,
+    created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
   )`,
 
@@ -19,6 +31,8 @@ export const SCHEMA: string[] = [
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
   )`,
+  `alter table members add column if not exists manager_id uuid references managers (id) on delete set null`,
+  `create index if not exists members_manager_idx on members (manager_id)`,
 
   `create table if not exists day_logs (
     id uuid primary key default gen_random_uuid(),
@@ -64,5 +78,6 @@ export const SCHEMA: string[] = [
     marked_at timestamptz not null default now(),
     primary key (member_id, log_date)
   )`,
+  `alter table day_marks add column if not exists marked_by text`,
   `create index if not exists day_marks_log_date_idx on day_marks (log_date)`,
 ];

@@ -101,7 +101,7 @@ export function StatsPanel({ groups }: { groups: Group[] }) {
         </Tile>
         <Tile
           label="Judged"
-          foot={t.brownies ? `${t.brownies} brownie${t.brownies === 1 ? '' : 's'} given` : t.judged ? 'verdicts in' : 'awaiting the admin'}
+          foot={t.brownies ? `${t.brownies} brownie${t.brownies === 1 ? '' : 's'} given` : t.judged ? 'verdicts in' : 'awaiting the manager'}
         >
           <CountUp value={t.judged} />
           <span className="tnum text-[13px] font-medium text-ink-4">/ {t.reported}</span>

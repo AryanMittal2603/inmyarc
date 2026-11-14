@@ -44,7 +44,13 @@ const ts = (v: unknown) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)
 
 export type ImportScope = 'team' | 'all';
 
-export async function importFromSupabase(d: Db, sourceUrl: string, key: string, scope: ImportScope = 'team'): Promise<ImportResult> {
+export async function importFromSupabase(
+  d: Db,
+  sourceUrl: string,
+  key: string,
+  scope: ImportScope = 'team',
+  managerId: string | null = null,
+): Promise<ImportResult> {
   const base = sourceUrl.trim().replace(/\/+$/, '');
   if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(base)) {
     throw new HttpError(400, 'Use the old Supabase project URL, like https://abcd1234.supabase.co.');
@@ -140,12 +146,13 @@ export async function importFromSupabase(d: Db, sourceUrl: string, key: string, 
 
   for (const part of chunks(cleanMembers)) {
     await d.query(
-      `insert into members (id, name, title, active, created_at, updated_at)
-       select x.id, x.name, x.title, x.active, coalesce(x.created_at, now()), now()
+      `insert into members (id, name, title, active, manager_id, created_at, updated_at)
+       select x.id, x.name, x.title, x.active, $2::uuid, coalesce(x.created_at, now()), now()
        from jsonb_to_recordset($1::jsonb) as x(id uuid, name text, title text, active boolean, created_at timestamptz)
        on conflict (id) do update
-         set name = excluded.name, title = excluded.title, active = excluded.active, updated_at = now()`,
-      [JSON.stringify(part)],
+         set name = excluded.name, title = excluded.title, active = excluded.active,
+             manager_id = coalesce($2::uuid, members.manager_id), updated_at = now()`,
+      [JSON.stringify(part), managerId],
     );
   }
 

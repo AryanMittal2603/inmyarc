@@ -3,6 +3,7 @@ import { BROWNIES, POINTS_PER_BROWNIE, VERDICTS, formatMinutes } from '../lib/co
 import { periodKey, periodLabel, reviewStart, standings, tally, type HistoryRow, type PeriodMode, type RankMode } from '../lib/review';
 import type { Category, Member } from '../lib/types';
 import { useHistory } from '../hooks/useHistory';
+import type { TeamScope } from '../lib/api';
 import { CookieIcon } from './icons';
 import { Badge, Button, Modal, Segmented, Select, cx } from './ui';
 
@@ -32,14 +33,41 @@ function VerdictBar({ counts, total, height = 12 }: { counts: Record<Category, n
 }
 
 /** The "Graph" view: standings by verdict or points, per week or month, and the team's verdict mix over time. */
-export function ReviewModal({ open, onClose, members, identity }: { open: boolean; onClose: () => void; members: Member[]; identity: string | null }) {
+export function ReviewModal({
+  open,
+  onClose,
+  members,
+  identity,
+  team,
+  include,
+  title = 'Review',
+}: {
+  open: boolean;
+  onClose: () => void;
+  members: Member[];
+  identity: string | null;
+  /** Whose history to load: a team's link name, or "*" for every team. */
+  team: TeamScope;
+  /** Narrows the people shown (the super admin's team filter). */
+  include?: (member: Member) => boolean;
+  title?: string;
+}) {
   const [mode, setMode] = useState<PeriodMode>('week');
   const [rankBy, setRankBy] = useState<RankMode>('verdicts');
   const [person, setPerson] = useState('');
   const [period, setPeriod] = useState('all');
   const from = reviewStart(mode);
-  const { members: loadedMembers, rows, loading, error } = useHistory(open, from);
-  const people = loadedMembers.length ? loadedMembers : members;
+  const history = useHistory(open, from, team);
+  const { loading, error } = history;
+  const people = useMemo(() => {
+    const list = history.members.length ? history.members : members;
+    return include ? list.filter(include) : list;
+  }, [history.members, members, include]);
+  const rows = useMemo(() => {
+    if (!include) return history.rows;
+    const ids = new Set(people.map((m) => m.id));
+    return history.rows.filter((r) => ids.has(r.member_id));
+  }, [history.rows, people, include]);
 
   const periods = useMemo(() => [...new Set(rows.map((r) => periodKey(r.log_date, mode)))].sort().reverse(), [rows, mode]);
   const inPeriod = useMemo(() => (period === 'all' ? rows : rows.filter((r) => periodKey(r.log_date, mode) === period)), [rows, period, mode]);
@@ -69,7 +97,7 @@ export function ReviewModal({ open, onClose, members, identity }: { open: boolea
     <Modal
       open={open}
       onClose={onClose}
-      title="Review"
+      title={title}
       subtitle="Verdicts, brownies and hours since the new system began"
       width={980}
       footer={
@@ -130,7 +158,7 @@ export function ReviewModal({ open, onClose, members, identity }: { open: boolea
       ) : rows.length === 0 ? (
         <div className="flex h-[260px] flex-col items-center justify-center gap-1 text-center">
           <p className="text-[13px] font-medium text-ink-2">Nothing to review yet.</p>
-          <p className="text-[12px] text-ink-4">The new system started on 1 October 2026 — verdicts appear here as admins give them.</p>
+          <p className="text-[12px] text-ink-4">The new system started on 1 October 2026 — verdicts appear here as managers give them.</p>
         </div>
       ) : (
         <div className="flex flex-col gap-5" data-stagger>

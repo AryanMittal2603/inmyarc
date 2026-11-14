@@ -1,4 +1,5 @@
 import { neon } from '@neondatabase/serverless';
+import { resetAuthCache } from './auth.js';
 import { env } from './env.js';
 import { HttpError } from './http.js';
 import { SCHEMA, SCHEMA_VERSION } from './schema.js';
@@ -15,6 +16,7 @@ let schemaReady: Promise<void> | null = null;
 export function setDb(db: Db | null): void {
   current = db;
   schemaReady = null;
+  resetAuthCache();
 }
 
 export function hasDatabase(): boolean {

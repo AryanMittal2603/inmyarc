@@ -33,13 +33,20 @@ export function Badge({ tone = 'mute', dot = false, className, children }: { ton
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
-  size?: 'sm' | 'md';
+  /** icon sizes are square with no padding (padding classes can't be overridden reliably). */
+  size?: 'sm' | 'md' | 'icon' | 'icon-sm' | 'icon-xs';
 };
 
 export function Button({ variant = 'secondary', size = 'md', className, type = 'button', ...rest }: ButtonProps) {
   const base =
     'focus-ring inline-flex items-center justify-center gap-1.5 rounded-sm border font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-45';
-  const sizes = { sm: 'h-7 px-2.5 text-[12px]', md: 'h-9 px-3.5 text-[13px]' }[size];
+  const sizes = {
+    sm: 'h-7 px-2.5 text-[12px]',
+    md: 'h-9 px-3.5 text-[13px]',
+    icon: 'size-9 text-[13px]',
+    'icon-sm': 'size-7 text-[12px]',
+    'icon-xs': 'size-6 text-[12px]',
+  }[size];
   const variants = {
     primary: 'border-ink bg-ink text-white hover:bg-ink-2 hover:border-ink-2 active:bg-ink',
     secondary: 'border-line-strong bg-surface text-ink hover:bg-mute-bg active:bg-line',
@@ -203,7 +210,7 @@ export function Modal({
             <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-ink">{title}</h2>
             {subtitle && <p className="mt-0.5 text-[12px] text-ink-3">{subtitle}</p>}
           </div>
-          <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close" className="-mt-0.5 -mr-1.5 size-7 px-0">
+          <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close" className="-mt-0.5 -mr-1.5">
             <CloseIcon className="size-3.5" />
           </Button>
         </header>

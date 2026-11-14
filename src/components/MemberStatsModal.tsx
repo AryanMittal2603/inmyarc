@@ -20,6 +20,7 @@ import { formatBytes, openAttachment } from '../lib/files';
 import { tally, verdictColor } from '../lib/review';
 import type { Mark, Member } from '../lib/types';
 import { useHistory } from '../hooks/useHistory';
+import type { TeamScope } from '../lib/api';
 import { ChevronLeftIcon, ChevronRightIcon, CookieIcon, PaperclipIcon } from './icons';
 import { Badge, Modal, cx } from './ui';
 
@@ -34,11 +35,22 @@ function StatTile({ label, value, foot, tint }: { label: string; value: string; 
 }
 
 /** A member's record since the new system began: tiles, verdict mix, a month calendar and recent tasks. */
-export function MemberStatsModal({ member, onClose, markToday }: { member: Member; onClose: () => void; markToday: Mark | null }) {
+export function MemberStatsModal({
+  member,
+  onClose,
+  markToday,
+  team,
+}: {
+  member: Member;
+  onClose: () => void;
+  markToday: Mark | null;
+  /** The member's team link name, or "*" (super admin). */
+  team: TeamScope;
+}) {
   const [month, setMonth] = useState(() => monthStart(today()));
   const [picked, setPicked] = useState<string | null>(null);
   const grid = useRef<HTMLDivElement>(null);
-  const { rows, entries, loading } = useHistory(true, NEW_SYSTEM_START);
+  const { rows, entries, loading } = useHistory(true, NEW_SYSTEM_START, team);
 
   const mine = useMemo(() => rows.filter((r) => r.member_id === member.id), [rows, member.id]);
   const myEntries = useMemo(() => entries.filter((e) => e.member_id === member.id), [entries, member.id]);

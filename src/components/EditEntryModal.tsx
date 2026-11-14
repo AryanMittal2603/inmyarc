@@ -136,7 +136,7 @@ export function EditEntryModal({
             />
           </div>
           <div>
-            <FieldLabel hint="whole day, at /rating">Verdict</FieldLabel>
+            <FieldLabel hint="whole day, on the manager’s page">Verdict</FieldLabel>
             <p className="flex h-8 items-center text-[11.5px] leading-[1.45] text-ink-4">Days are judged as a whole, not task by task.</p>
           </div>
         </div>

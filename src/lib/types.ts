@@ -9,6 +9,15 @@ export interface Member {
   name: string;
   title: string | null;
   active: boolean;
+  manager_id: string | null;
+}
+
+/** A manager and the team they rate. The team's links are /task/<slug> and /rating/<slug>. */
+export interface Team {
+  id: string;
+  name: string;
+  slug: string;
+  active: boolean;
 }
 
 export interface DayLog {
@@ -58,6 +67,10 @@ export interface DayPayload {
   sig: string;
   today: string;
   openFrom: string;
+  /** The team this board is about; null on the super admin's all-teams view. */
+  team: Pick<Team, 'id' | 'name' | 'slug'> | null;
+  /** Every team (super admin view only). */
+  teams: Team[];
   members: Member[];
   dayLogs: DayLog[];
   entries: Entry[];
@@ -76,6 +89,7 @@ export interface SetupStatus {
   ready: boolean;
   admin: boolean;
   files: boolean;
+  managers: number;
   members: number;
   entries: number;
   today: string;
@@ -89,4 +103,39 @@ export interface ImportResult {
   entries: number;
   marks: number;
   files: { copied: number; failed: number; skipped: number };
+}
+
+/** One row on the home page. */
+export interface TeamLink {
+  name: string;
+  slug: string;
+  members: number;
+  /** Active members who logged something today. */
+  reported: number;
+}
+
+export interface Session {
+  adminConfigured: boolean;
+  admin: boolean;
+  manager: { name: string; slug: string } | null;
+  /** The team named in ?team=, when it exists and is active. */
+  team: { name: string; slug: string } | null;
+}
+
+export interface AdminManager extends Team {
+  created_at: string;
+  members: number;
+}
+
+export interface AdminMember extends Member {
+  created_at: string;
+  has_history: boolean;
+}
+
+export interface AdminOverview {
+  managers: AdminManager[];
+  members: AdminMember[];
+  settings: { editableFrom: string | null; envEditableFrom: string | null; openFrom: string };
+  status: { files: boolean; admin: boolean };
+  today: string;
 }

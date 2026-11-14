@@ -144,7 +144,7 @@ function BrowniePill({ label }: { label: string }) {
   );
 }
 
-/** Admin: five verdict buttons + three brownie toggles. Everyone else: the verdict pill. */
+/** Managers: five verdict buttons + three brownie toggles. Everyone else: the verdict pill. */
 function VerdictCell({ group, canJudge, onMark }: { group: Group; canJudge: boolean; onMark: (memberId: string, category: Category | null, flags: Brownies) => void }) {
   const mark = group.mark;
   const flags = brownieFlags(mark);
@@ -233,6 +233,8 @@ export interface BoardTableProps {
   onAttendance: (memberId: string, attendance: Attendance) => void;
   onAddFor: (memberId: string) => void;
   onMember: (member: Member) => void;
+  /** All-teams view: the team each person belongs to, shown under their name. */
+  teamOf?: (member: Member) => string | null;
 }
 
 export function BoardTable({
@@ -252,6 +254,7 @@ export function BoardTable({
   onAttendance,
   onAddFor,
   onMember,
+  teamOf,
 }: BoardTableProps) {
   const readOnly = !canEditTasks;
   const root = useRef<HTMLDivElement>(null);
@@ -290,9 +293,9 @@ export function BoardTable({
                   c.key === 'sno'
                     ? anyJudged
                       ? 'Ordered by verdict — everyone in a category shares the place'
-                      : 'Alphabetical until an admin judges the day'
+                      : 'Alphabetical until a manager judges the day'
                     : c.key === 'verdict'
-                      ? "The admin's verdict on the whole day, plus brownies for overtime, for working a holiday, and for saving the day"
+                      ? "The manager's verdict on the whole day, plus brownies for overtime, for working a holiday, and for saving the day"
                       : undefined
                 }
                 className={cx('px-3 py-2.5 text-[10.5px] font-semibold tracking-[0.1em] text-ink-3 uppercase', c.key === 'sno' && 'text-center')}
@@ -347,6 +350,11 @@ export function BoardTable({
                           </button>
                           {isYou && <span className="text-[10px] font-semibold tracking-[0.08em] text-ink-4 uppercase">you</span>}
                         </div>
+                        {teamOf && (
+                          <p className="mt-0.5 truncate text-[11px] text-ink-4" title="Team">
+                            {teamOf(g.member) ?? 'No team'}
+                          </p>
+                        )}
                         <div className="mt-1.5">
                           {logged || presumed || !readOnly ? (
                             <InlineSelect

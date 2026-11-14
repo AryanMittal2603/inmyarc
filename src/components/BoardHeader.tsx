@@ -14,6 +14,7 @@ export function BoardHeader({
   identity,
   locked,
   canAdd = !locked,
+  team,
 }: {
   date: string;
   onDateChange: (date: string) => void;
@@ -24,6 +25,8 @@ export function BoardHeader({
   identity: string | null;
   locked: boolean;
   canAdd?: boolean;
+  /** The team's name (its manager), shown after the organisation. */
+  team?: string | null;
 }) {
   const root = useRef<HTMLElement>(null);
   const title = useRef<HTMLDivElement>(null);
@@ -47,7 +50,7 @@ export function BoardHeader({
         <span className="hidden shrink-0 text-[11px] leading-none font-semibold tracking-[0.14em] whitespace-nowrap text-ink-3 uppercase xl:inline">
           <span className="text-ink">{APP.org}</span>
           <span className="mx-2 text-line-strong">/</span>
-          {APP.title}
+          {team ?? APP.title}
         </span>
         <span className="hidden h-5 w-px shrink-0 bg-line-strong xl:block" />
         <div ref={title} className="flex min-w-0 items-center gap-x-2.5 overflow-hidden">
@@ -83,7 +86,7 @@ export function BoardHeader({
             Today
           </Button>
         )}
-        <Button onClick={onRefresh} aria-label="Refresh" className="w-9 shrink-0 px-0">
+        <Button size="icon" onClick={onRefresh} aria-label="Refresh" className="shrink-0">
           <RefreshIcon className={cx('size-4', busy && 'animate-spin')} />
         </Button>
         <Button className="shrink-0" onClick={onGraph}>

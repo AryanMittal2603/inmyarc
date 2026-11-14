@@ -106,3 +106,29 @@ export function attachment(value: unknown): AttachmentInput | null | undefined {
 export function bool(value: unknown): boolean {
   return value === true;
 }
+
+/** URL names for teams: /task/<slug>, /rating/<slug>. */
+export const SLUG = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
+
+export function isSlug(value: unknown): value is string {
+  return typeof value === 'string' && SLUG.test(value);
+}
+
+export function slug(value: unknown): string {
+  const v = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (!SLUG.test(v)) throw new HttpError(400, 'Use 1–40 lowercase letters, numbers or hyphens for the link name, like "manager1".');
+  return v;
+}
+
+export function personName(value: unknown, what = 'The name'): string {
+  const v = typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : '';
+  if (!v) throw new HttpError(400, `${what} is missing.`);
+  if (v.length > 60) throw new HttpError(400, `${what} is too long (60 characters at most).`);
+  return v;
+}
+
+export function password(value: unknown): string {
+  if (typeof value !== 'string' || value.length < 8) throw new HttpError(400, 'Use a password of at least 8 characters.');
+  if (value.length > 200) throw new HttpError(400, 'That password is too long.');
+  return value;
+}

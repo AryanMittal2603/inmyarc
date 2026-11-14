@@ -359,7 +359,7 @@ export function LogDayModal({
           </div>
           <p className="text-[11.5px] leading-[1.5] text-ink-3" data-stagger>
             The task lands in their row for that day as <span className="font-medium text-ink-2">Not done</span>. Anyone can move it to Done or Rework
-            required and leave a remark straight from the table; an admin rates it.
+            required and leave a remark straight from the table; the manager rates it.
           </p>
         </div>
       )}

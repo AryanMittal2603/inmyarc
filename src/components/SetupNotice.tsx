@@ -35,21 +35,22 @@ export function SetupNotice() {
       ),
     },
     {
-      title: 'Set the admin passcode',
+      title: 'Set the super admin password',
       done: status?.admin,
       body: (
         <>
-          <b>Settings</b> → <b>Environment Variables</b> → add <Code>ADMIN_PASSCODE</Code>. It unlocks <Code>/rating</Code> for verdicts and for editing
-          locked days.
+          <b>Settings</b> → <b>Environment Variables</b> → add <Code>ADMIN_PASSCODE</Code>. It signs you in at <Code>/admin</Code>, where you create
+          managers and their teams.
         </>
       ),
     },
     {
-      title: 'Redeploy, then import the team',
+      title: 'Redeploy, then create the teams',
+      done: (status?.managers ?? 0) > 0,
       body: (
         <>
-          Redeploy so the new variables load. Then sign in at <Code>/rating</Code> and use <b>Import the team</b> to copy the team list from the old
-          project. Old entries and verdicts are optional.
+          Redeploy so the new variables load. Then sign in at <Code>/admin</Code>, add each manager with a link name and password, and add their
+          employees (or import them from the old project). Every team gets <Code>/task/&lt;name&gt;</Code> and <Code>/rating/&lt;name&gt;</Code>.
         </>
       ),
     },

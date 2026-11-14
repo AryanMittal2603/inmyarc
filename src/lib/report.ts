@@ -70,7 +70,8 @@ function rows(groups: Group[]): ReportRow[] {
   return out;
 }
 
-export async function downloadDayReport(date: string, groups: Group[]): Promise<void> {
+/** `scope` names the team (or "All teams") in the header and the file name. */
+export async function downloadDayReport(date: string, groups: Group[], scope?: { label: string; file: string }): Promise<void> {
   const [{ jsPDF }, autoTableModule] = await Promise.all([import('jspdf'), import('jspdf-autotable')]);
   const autoTable = autoTableModule.default;
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
@@ -137,7 +138,7 @@ export async function downloadDayReport(date: string, groups: Group[]): Promise<
       doc.setTextColor(...MUTED);
       doc.text(longDate(date), MARGIN + w + 4, MARGIN + 7);
       doc.setFontSize(8);
-      doc.text(`${APP.org} — ${APP.title}`, PAGE_WIDTH - MARGIN, MARGIN + 4, { align: 'right' });
+      doc.text(scope ? `${APP.org} — ${APP.title} — ${scope.label}` : `${APP.org} — ${APP.title}`, PAGE_WIDTH - MARGIN, MARGIN + 4, { align: 'right' });
       doc.text(`Generated ${generated} ${APP.timezone.replace('_', ' ')}`, PAGE_WIDTH - MARGIN, MARGIN + 8.5, { align: 'right' });
       doc.setFontSize(8.5);
       doc.setTextColor(...INK);
@@ -170,5 +171,5 @@ export async function downloadDayReport(date: string, groups: Group[]): Promise<
     doc.setTextColor(...MUTED);
     doc.text(`Page ${p} of ${pages}`, PAGE_WIDTH - MARGIN, 204, { align: 'right' });
   }
-  doc.save(`inmyarc-${date}.pdf`);
+  doc.save(scope ? `inmyarc-${scope.file}-${date}.pdf` : `inmyarc-${date}.pdf`);
 }

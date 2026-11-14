@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ApiError, api, errorText } from '../lib/api';
+import { ApiError, api, errorText, type TeamScope } from '../lib/api';
 import { buildGroups } from '../lib/board';
 import { NO_BROWNIES, today } from '../lib/config';
 import { uploadAttachment } from '../lib/files';
-import type { Attachment, Attendance, Brownies, Category, DayLog, Entry, Mark, Member, Status } from '../lib/types';
+import type { Attachment, Attendance, Brownies, Category, DayLog, DayPayload, Entry, Mark, Member, Status, Team } from '../lib/types';
 import { toMinutes } from '../components/ui';
 
 /** How often an open board checks for changes made by others (only while the tab is visible). */
@@ -31,6 +31,8 @@ export interface EntryEdit {
 }
 
 interface DayState {
+  team: DayPayload['team'];
+  teams: Team[];
   members: Member[];
   dayLogs: DayLog[];
   entries: Entry[];
@@ -40,9 +42,15 @@ interface DayState {
   error: string | null;
   /** The API has no database yet. */
   needsSetup: boolean;
+  /** The team link doesn't exist or was switched off. */
+  notFound: boolean;
+  /** The all-teams view needs the super admin to sign in again. */
+  signedOut: boolean;
 }
 
 const EMPTY: DayState = {
+  team: null,
+  teams: [],
   members: [],
   dayLogs: [],
   entries: [],
@@ -51,6 +59,8 @@ const EMPTY: DayState = {
   loading: true,
   error: null,
   needsSetup: false,
+  notFound: false,
+  signedOut: false,
 };
 
 /** Editable by the team when the day is between the backfill start and today. */
@@ -59,25 +69,31 @@ export function isOpenDay(date: string, openFrom: string | null): boolean {
   return date <= t && date >= (openFrom ?? t);
 }
 
-export function useDay(date: string) {
+/** One day of one team's board ("*" = every team, for the super admin), kept live by polling. */
+export function useDay(date: string, team: TeamScope) {
   const [state, setState] = useState<DayState>(EMPTY);
   const [busy, setBusy] = useState(false);
   const [syncedAt, setSyncedAt] = useState(() => new Date().toISOString());
   const dateRef = useRef(date);
   dateRef.current = date;
+  const teamRef = useRef(team);
+  teamRef.current = team;
   const sigRef = useRef<string | null>(null);
 
   const load = useCallback(async (options: { quiet?: boolean } = {}) => {
     const day = dateRef.current;
     if (!options.quiet) setState((s) => ({ ...s, loading: true, error: null }));
     try {
-      const res = await api.day(day, options.quiet ? sigRef.current : null);
-      if (dateRef.current !== day) return;
+      const scope = teamRef.current;
+      const res = await api.day(day, scope, options.quiet ? sigRef.current : null);
+      if (dateRef.current !== day || teamRef.current !== scope) return;
       if ('unchanged' in res) {
         setState((s) => ({ ...s, loading: false, error: null }));
       } else {
         sigRef.current = res.sig;
         setState({
+          team: res.team,
+          teams: res.teams,
           members: res.members,
           dayLogs: res.dayLogs,
           entries: res.entries,
@@ -86,20 +102,32 @@ export function useDay(date: string) {
           loading: false,
           error: null,
           needsSetup: false,
+          notFound: false,
+          signedOut: false,
         });
       }
       setSyncedAt(new Date().toISOString());
     } catch (error) {
       if (dateRef.current !== day) return;
-      const needsSetup = error instanceof ApiError && error.code === 'no_database';
-      setState((s) => ({ ...s, loading: false, needsSetup, error: needsSetup ? null : errorText(error, 'Something went wrong.') }));
+      const code = error instanceof ApiError ? error.code : undefined;
+      const needsSetup = code === 'no_database';
+      const notFound = code === 'no_team';
+      const signedOut = error instanceof ApiError && error.status === 401;
+      setState((s) => ({
+        ...s,
+        loading: false,
+        needsSetup,
+        notFound,
+        signedOut,
+        error: needsSetup || notFound || signedOut ? null : errorText(error, 'Something went wrong.'),
+      }));
     }
   }, []);
 
   useEffect(() => {
     sigRef.current = null;
     void load();
-  }, [date, load]);
+  }, [date, team, load]);
 
   // "Live": poll while visible, and catch up whenever the tab regains focus.
   useEffect(() => {
@@ -144,7 +172,7 @@ export function useDay(date: string) {
       run(async () => {
         const titled = input.entries.filter((e) => e.title.trim().length > 0);
         const files = await Promise.all(titled.map((e) => (e.file ? uploadAttachment(e.file) : null)));
-        const res = await api.submitDay({
+        const res = await api.submitDay(teamRef.current, {
           memberId: input.memberId,
           date: dateRef.current,
           attendance: input.attendance,
@@ -165,7 +193,7 @@ export function useDay(date: string) {
   const assignTask = useCallback(
     (input: { memberId: string; logDate: string; title: string; details: string }) =>
       run(() =>
-        api.createEntry({
+        api.createEntry(teamRef.current, {
           memberId: input.memberId,
           date: input.logDate,
           title: input.title.trim(),
@@ -178,7 +206,7 @@ export function useDay(date: string) {
 
   const setStatus = useCallback(
     (entryId: string, status: Status, actorId: string | null) =>
-      run(() => api.updateEntry(entryId, { status, statusChanged: true, actorId })),
+      run(() => api.updateEntry(teamRef.current, entryId, { status, statusChanged: true, actorId })),
     [run],
   );
 
@@ -188,7 +216,7 @@ export function useDay(date: string) {
         let attachment: Attachment | null | undefined;
         if (edit.attachment instanceof File) attachment = await uploadAttachment(edit.attachment);
         else if (edit.attachment === 'clear') attachment = null;
-        return api.updateEntry(entryId, {
+        return api.updateEntry(teamRef.current, entryId, {
           title: edit.title.trim(),
           details: edit.details.trim(),
           status: edit.status,
@@ -208,12 +236,12 @@ export function useDay(date: string) {
     [run],
   );
 
-  const setRemarks = useCallback((entryId: string, remarks: string) => run(() => api.updateEntry(entryId, { remarks })), [run]);
+  const setRemarks = useCallback((entryId: string, remarks: string) => run(() => api.updateEntry(teamRef.current, entryId, { remarks })), [run]);
 
-  const deleteEntry = useCallback((entryId: string) => run(() => api.deleteEntry(entryId)), [run]);
+  const deleteEntry = useCallback((entryId: string) => run(() => api.deleteEntry(teamRef.current, entryId)), [run]);
 
   const setAttendance = useCallback(
-    (memberId: string, attendance: Attendance) => run(() => api.setAttendance({ memberId, date: dateRef.current, attendance })),
+    (memberId: string, attendance: Attendance) => run(() => api.setAttendance(teamRef.current, { memberId, date: dateRef.current, attendance })),
     [run],
   );
 
