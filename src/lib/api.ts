@@ -15,6 +15,7 @@ import type {
   SetupStatus,
   Status,
   TeamLink,
+  DayPulse,
 } from './types';
 
 /**
@@ -111,7 +112,7 @@ export interface EntryPatch {
 
 export const api = {
   setup: () => request<SetupStatus>('GET', 'setup'),
-  teams: () => request<{ teams: TeamLink[]; today: string }>('GET', 'teams'),
+  teams: () => request<{ teams: TeamLink[]; today: string; pulse?: DayPulse }>('GET', 'teams'),
   day: (date: string, team: TeamScope, sig?: string | null) =>
     request<DayPayload | { unchanged: true; sig: string }>(
       'GET',

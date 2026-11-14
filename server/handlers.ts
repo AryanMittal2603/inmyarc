@@ -172,7 +172,37 @@ export async function getTeams(): Promise<Response> {
      from managers t where t.active order by lower(t.name)`,
     [t],
   );
-  return json({ teams, today: t });
+  return json({ teams, today: t, pulse: await todaysPulse(d, t) });
+}
+
+/**
+ * Today's work across every active team, for the home page: counts, minutes, and when each task
+ * was added (minutes after midnight IST) with its status. No names or titles leave the server.
+ */
+async function todaysPulse(d: Db, t: string) {
+  const rows = await d.query<{ status: 'done' | 'rework' | 'not_done'; minutes: number | null; created_at: string | Date }>(
+    `select e.status, e.minutes, e.created_at
+     from entries e
+     join members m on m.id = e.member_id and m.active
+     join managers t on t.id = m.manager_id and t.active
+     where e.log_date = $1
+     order by e.created_at, e.id
+     limit 1000`,
+    [t],
+  );
+  const IST = 330; // India has no daylight saving: always UTC+5:30
+  const times = rows.map((r) => {
+    const at = new Date(r.created_at);
+    return [(at.getUTCHours() * 60 + at.getUTCMinutes() + IST) % 1440, r.status] as const;
+  });
+  return {
+    tasks: rows.length,
+    done: rows.filter((r) => r.status === 'done').length,
+    rework: rows.filter((r) => r.status === 'rework').length,
+    notDone: rows.filter((r) => r.status === 'not_done').length,
+    minutes: rows.reduce((n, r) => n + (r.minutes ?? 0), 0),
+    times,
+  };
 }
 
 const SIGNATURE_SQL = `select

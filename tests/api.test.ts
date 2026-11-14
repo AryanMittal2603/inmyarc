@@ -562,6 +562,24 @@ describe('polling signature', () => {
     const reported = Object.fromEntries(teams.data.teams.map((t: { slug: string; reported: number }) => [t.slug, t.reported]));
     assert.deepEqual(reported, { alpha: 1, beta: 1 }, 'the home page counts who logged today');
   });
+
+  test('the home page gets today\'s pulse without names or titles', async () => {
+    const before = (await call('GET', 'teams')).data.pulse;
+    assert.equal(before.tasks, before.done + before.rework + before.notDone);
+    assert.equal(before.times.length, before.tasks);
+    await call('POST', 'entries', { team: 'alpha', memberId: ana, date: today(), title: 'Pulse check', status: 'rework', minutes: 25 });
+    const after = (await call('GET', 'teams')).data.pulse;
+    assert.equal(after.tasks, before.tasks + 1);
+    assert.equal(after.rework, before.rework + 1);
+    assert.equal(after.minutes, before.minutes + 25);
+    const [at, status] = after.times[after.times.length - 1];
+    const now = new Date();
+    const ist = (now.getUTCHours() * 60 + now.getUTCMinutes() + 330) % 1440;
+    assert.equal(status, 'rework');
+    assert.ok(Math.abs(at - ist) <= 2 || Math.abs(at - ist) >= 1438, `logged at ${at}, now ${ist}`);
+    assert.ok(!JSON.stringify(after).includes('Pulse check'), 'no titles');
+    assert.ok(!JSON.stringify(after).includes('Ana'), 'no names');
+  });
 });
 
 describe('import from the old Supabase project', () => {

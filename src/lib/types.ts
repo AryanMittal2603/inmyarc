@@ -114,6 +114,17 @@ export interface TeamLink {
   reported: number;
 }
 
+/** Today's work across every active team, for the home page. No names or titles. */
+export interface DayPulse {
+  tasks: number;
+  done: number;
+  rework: number;
+  notDone: number;
+  minutes: number;
+  /** [minutes after midnight IST, status] for each task added today, oldest first. */
+  times: Array<[number, Status]>;
+}
+
 export interface Session {
   adminConfigured: boolean;
   admin: boolean;

@@ -79,19 +79,23 @@
   }
 }
 
-/* The home page uses the product's own palette and type. Headlines get Inter's display cut,
-   which the browser only downloads for pages that use it. */
-@font-face {
-  font-family: 'Inter Display';
-  font-style: normal;
-  font-display: swap;
-  font-weight: 100 900;
-  src: url('../node_modules/@fontsource-variable/inter/files/inter-latin-opsz-normal.woff2') format('woff2-variations');
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+/* The home page is built from the app's own pieces; these are its few moving parts. */
+@keyframes arc-pulse {
+  from {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+  to {
+    transform: scale(3.4);
+    opacity: 0;
+  }
 }
 
-@theme {
-  --font-display: 'Inter Display', 'Inter Variable', 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+/* the clock's colon lives in SVG text, where only fill-opacity applies */
+@keyframes arc-blink {
+  50% {
+    fill-opacity: 0.15;
+  }
 }
 
 @media (prefers-reduced-motion: no-preference) {
